@@ -128,11 +128,18 @@ def main() -> int:
     q = store.quarantined(limit=5)
     g = s["grounding"]
     total = sum(g.values()) or 1
-    print(f"  Grounding across the corpus: "
-          f"{(total - g.get('not_found', 0)) / total:.1%} of claims verified against source")
+    bad = g.get("not_found", 0) + g.get("unverifiable", 0)
+    print(f"  Grounding across the corpus: {(total - bad) / total:.1%} of claims "
+          f"verified against their source")
     print(f"    exact {g.get('exact', 0)} · normalised {g.get('fuzzy', 0)} · "
-          f"elided {g.get('gapped', 0)} · REJECTED {g.get('not_found', 0)}\n")
-    print("  Quarantined claims -- quote could not be found on the cited page:")
+          f"elided {g.get('gapped', 0)}")
+    print(f"  Quarantined: {bad} -- kept and reported, excluded from reconciliation")
+    print(f"    {g.get('not_found', 0):4d} quote absent from the page it cites "
+          f"(the model attached evidence that is not there)")
+    print(f"    {g.get('unverifiable', 0):4d} evidence too short to check -- a bare figure "
+          f"like '3.28' occurs\n         all over a financial page, so finding it proves "
+          f"nothing about which row was read\n")
+    print("  Examples:")
     for c in q:
         print(f"    · {c.measure_raw[:34]:36s} p{c.evidence.page_no}")
         for line in textwrap.wrap(f'claimed: "{c.evidence.quote}"', W - 8):

@@ -295,7 +295,8 @@ those keys. Adding the sixth document does not re-examine the first five.
 ```
 6 documents · 1,700 claims (1,589 active, 111 quarantined)
 1,144 relations · 307 cross-document
-grounding 93.5%  (435 exact · 754 normalised · 400 elided · 111 rejected)
+grounding 93.5%  (435 exact · 754 normalised · 400 elided)
+quarantined 111  (65 quote absent from its page · 46 evidence too short to check)
 verdicts: 611 underspecified · 488 complementary · 28 contradicts · 17 corroborates
 ```
 
@@ -335,9 +336,14 @@ mechanisms, all demonstrable: period containment (Q4 FY24 nested in FY24, with
 the arithmetic check confirming 20.76bn ≤ 81.42bn), reporting basis (reported vs
 adjusted EBITDA), and disjoint periods.
 
-**Case 4 — failures found and handled.** 111 quarantined claims, 16/16 fabricated
-scopes caught on a single slide, and the extraction error below that only
-cross-document reconciliation could expose.
+**Case 4 — failures found and handled.** 111 quarantined claims, reported as two
+distinct kinds: **65** whose quote is simply absent from the page it cites, and
+**46** whose evidence is too short to check — a bare `3.28` does appear on its
+page, but it would appear on almost any page of a financial document, so it
+proves nothing about which row was read. Unverifiable is not the same as
+invented, and collapsing the two would have overstated the hallucination rate by
+70%. Plus 16/16 fabricated scopes caught on a single slide, and the extraction
+error below that only cross-document reconciliation could expose.
 
 ## Findings
 

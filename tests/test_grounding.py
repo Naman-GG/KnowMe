@@ -112,3 +112,27 @@ def test_printed_page_ignores_numbers_in_body_text():
 
     numbered = "Annual Report 2024-25\nsome body text here\n27\n"
     assert _printed_page_number(numbered) == "27"
+
+
+def test_short_quote_is_unverifiable_not_missing():
+    """"3.28" is on the page, but a bare figure is not evidence.
+
+    Reporting this as "not found" implied the model had invented it. It had not;
+    the quote simply cannot be checked, which is a different failure.
+    """
+    p = Page(page_no=11, text="Lowest Price - Highest Price\n148.38\n3.28\nNil - 400.00\n")
+    assert "3.28" in p.text
+    status, _, _ = locate_quote("3.28", p)
+    assert status is GroundingStatus.UNVERIFIABLE
+    assert status is not GroundingStatus.NOT_FOUND
+
+
+def test_the_two_quarantine_kinds_are_counted_apart():
+    p = Page(page_no=11, text="Lowest Price - Highest Price\n148.38\n3.28\n")
+    report = GroundingReport()
+    ground_claim(claim("3.28"), p, report)                       # too short
+    ground_claim(claim("a span that is nowhere on this page"), p, report)  # absent
+    d = report.as_dict()
+    assert d["quarantined"] == 2
+    assert d["unverifiable"] == 1
+    assert d["not_found"] == 1

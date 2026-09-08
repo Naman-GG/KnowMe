@@ -228,7 +228,10 @@ async def highlights() -> dict:
         "case2": view(contradiction),
         "case3": [view(r) for r in (by_period, by_basis, by_scope) if r],
         "case4": {
-            "grounding_rate": round((total - g.get("not_found", 0)) / total, 4),
+            "grounding_rate": round(
+                (total - g.get("not_found", 0) - g.get("unverifiable", 0)) / total, 4),
+            "not_found": g.get("not_found", 0),
+            "unverifiable": g.get("unverifiable", 0),
             "grounding": g,
             "quarantined": [
                 {**_claim_view(c), "reason": c.quarantine_reason,

@@ -59,6 +59,8 @@ class GroundingReport:
     fuzzy: int = 0
     gapped: int = 0
     quarantined: int = 0
+    unverifiable: int = 0   # quote too short to check
+    not_found: int = 0      # quote genuinely absent from its page
     qualifiers_dropped: int = 0
     dropped_detail: dict[str, int] = field(default_factory=dict)
 
@@ -70,6 +72,8 @@ class GroundingReport:
             "grounded_fuzzy": self.fuzzy,
             "grounded_gapped": self.gapped,
             "quarantined": self.quarantined,
+            "unverifiable": self.unverifiable,
+            "not_found": self.not_found,
             "grounding_rate": round(rate, 4),
             "qualifiers_dropped": self.qualifiers_dropped,
             "qualifiers_dropped_detail": dict(
@@ -79,10 +83,18 @@ class GroundingReport:
 
 
 def locate_quote(quote: str, page: Page) -> tuple[GroundingStatus, int | None, int | None]:
-    """Find a quote in a page, tolerating whitespace and typographic differences."""
+    """Find a quote in a page, tolerating whitespace and typographic differences.
+
+    A quote shorter than `MIN_QUOTE_CHARS` is reported UNVERIFIABLE rather than
+    NOT_FOUND, and the difference matters. "3.28" really does appear on the page
+    it cites -- but so would it on most pages of a financial document, so finding
+    it proves nothing about whether the model read the right row. That is a claim
+    we cannot check, which is not the same as a claim we caught being invented.
+    Both are quarantined; only one is evidence of the model making things up.
+    """
     quote = (quote or "").strip()
     if len(quote) < MIN_QUOTE_CHARS:
-        return GroundingStatus.NOT_FOUND, None, None
+        return GroundingStatus.UNVERIFIABLE, None, None
 
     # 1. Exact, in the raw text -- gives real offsets for highlighting.
     idx = page.text.find(quote)
@@ -179,13 +191,27 @@ def ground_claim(claim: Claim, page: Page, report: GroundingReport) -> Claim:
     claim.evidence.char_start = start
     claim.evidence.char_end = end
 
+    if status is GroundingStatus.UNVERIFIABLE:
+        claim.status = ClaimStatus.QUARANTINED
+        claim.quarantine_reason = (
+            f"evidence too short to verify ({len(claim.evidence.quote.strip())} "
+            f"characters, minimum {MIN_QUOTE_CHARS}): "
+            f"{claim.evidence.quote.strip()[:60]!r} — a bare figure matches by "
+            "coincidence on a page full of numbers, so it does not show which "
+            "row was read"
+        )
+        report.quarantined += 1
+        report.unverifiable += 1
+        return claim
+
     if status is GroundingStatus.NOT_FOUND:
         claim.status = ClaimStatus.QUARANTINED
         claim.quarantine_reason = (
-            "quote not found on cited page: "
+            "quote not found on the page it cites: "
             f"{claim.evidence.quote[:120]!r}"
         )
         report.quarantined += 1
+        report.not_found += 1
         return claim
 
     report.exact += status is GroundingStatus.EXACT

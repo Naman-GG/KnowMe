@@ -21,6 +21,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from factlayer.config import settings                    # noqa: E402
 from factlayer.db import Store                           # noqa: E402
+from factlayer.ground import GroundingReport, ground_claim  # noqa: E402
+from factlayer.ingest import load_pdf                    # noqa: E402
+from factlayer.models import ClaimStatus                 # noqa: E402
 from factlayer.normalize.periods import parse_period     # noqa: E402
 from factlayer.normalize.units import canonicalise, parse_unit  # noqa: E402
 from factlayer.reconcile import reconcile_all            # noqa: E402
@@ -36,6 +39,38 @@ def main() -> int:
     if not claims:
         print("nothing stored")
         return 1
+
+    # Re-ground against the source PDFs. Grounding is deterministic, so an
+    # improvement to it should reach claims already stored -- the same reason
+    # periods and units are re-parsed here rather than re-extracted.
+    doc_paths = {d["doc_id"]: d["path"] for d in store.documents()}
+    pages: dict[str, dict] = {}
+    report = GroundingReport()
+    reground = 0
+    for c in claims:
+        path = doc_paths.get(c.doc_id)
+        if not path or not Path(path).exists():
+            continue
+        if c.doc_id not in pages:
+            pages[c.doc_id] = {p.page_no: p for p in load_pdf(path).pages}
+        page = pages[c.doc_id].get(c.evidence.page_no)
+        if page is None:
+            continue
+        before = (c.evidence.grounding, c.status)
+        c.status = ClaimStatus.ACTIVE
+        c.quarantine_reason = None
+        if not args.dry_run:
+            ground_claim(c, page, report)
+        else:
+            from factlayer.ground import locate_quote
+            c.evidence.grounding = locate_quote(c.evidence.quote, page)[0]
+        if (c.evidence.grounding, c.status) != before:
+            reground += 1
+    print(f"claims re-grounded  : {reground} changed status or tier "
+          f"(of {len(claims)})")
+    if report.total:
+        print(f"  quarantined: {report.quarantined} "
+              f"({report.unverifiable} unverifiable, {report.not_found} not found)")
 
     periods_changed = units_changed = 0
     for c in claims:

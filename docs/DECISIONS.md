@@ -219,6 +219,22 @@ the model attached it to the right thing. It took a second document disagreeing
 to expose the error, which is an argument for the whole approach: a knowledge
 layer finds mistakes that per-document validation structurally cannot.
 
+### "Not found" was hiding two different failures
+The quarantine reason read *"quote not found on cited page"* for a claim whose
+evidence was `"3.28"` — a figure that **is** on the page it cites. The real cause
+was `MIN_QUOTE_CHARS`: a quote under eight characters is rejected because a bare
+number occurs all over a financial page, so finding it proves nothing about which
+row was read.
+
+The rule is right; the message was wrong, and the wrongness mattered. Of 111
+quarantined claims, **46 were merely unverifiable and 65 genuinely absent** —
+reporting them as one number overstated the model's hallucination rate by about
+70%. Grounding now returns a distinct `UNVERIFIABLE` status with an explanation,
+and the split is shown everywhere the figure appears.
+
+Found because a reader asked why a number that was plainly on the page had been
+reported as missing.
+
 ## Cases located in the starter corpus
 
 | Case | Evidence |

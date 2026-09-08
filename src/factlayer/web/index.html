@@ -143,8 +143,14 @@ async function loadCases(){
        silently dropped, so the failure stays visible and measurable.</p></div>`);
   parts.push(`<div class="card"><div class="body" style="display:block">
       <b>${(100*(f.grounding_rate ?? 0)).toFixed(1)}%</b> of claims verified against their
-      source page &mdash; ${g.exact||0} exact, ${g.fuzzy||0} normalised,
-      ${g.gapped||0} elided, <b>${g.not_found||0} rejected</b>.
+      source page &mdash; ${g.exact||0} exact, ${g.fuzzy||0} normalised, ${g.gapped||0} elided.
+      <p>Quarantined claims come in two kinds, and only one is the model making
+      things up:<br>
+      &bull; <b>${f.not_found||0}</b> quote <b>absent</b> from the page it cites.<br>
+      &bull; <b>${f.unverifiable||0}</b> evidence <b>too short to check</b> &mdash; a bare
+      figure such as &ldquo;3.28&rdquo; does appear on its page, but it would appear on
+      almost any page of a financial document, so it proves nothing about which row was
+      read. Unverifiable is not the same as invented.</p>
       <p>Grounding also checks <em>qualifiers</em>. A model that invents the context a
       figure sits in is more dangerous than one that invents the figure: a missing scope
       yields an honest &ldquo;underspecified&rdquo;, an invented one yields a confident
