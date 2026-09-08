@@ -1,0 +1,31 @@
+[project]
+name = "factlayer"
+version = "0.1.0"
+description = "A fact knowledge layer: extracts qualified claims from PDFs and reconciles them across documents."
+requires-python = ">=3.11"
+dependencies = [
+    "pymupdf>=1.24",
+    "pydantic>=2.7",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+    "numpy>=1.26",
+    "scikit-learn>=1.5",
+    "python-dotenv>=1.0",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/factlayer"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

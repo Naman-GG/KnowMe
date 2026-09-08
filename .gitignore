@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Env & secrets
+.env
+.env.local
+
+# Local artifacts
+data/*.db
+data/*.db-journal
+data/cache/
+data/uploads/
+*.log
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

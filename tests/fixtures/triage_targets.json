@@ -1,0 +1,14 @@
+{
+  "_comment": "Evaluation fixture only -- never read by the pipeline. Each target is a verbatim string from the starter corpus that a fact-density triage must not discard. Used to measure page-selection recall so tuning the scorer cannot silently regress.",
+  "targets": [
+    {"doc": "delhivery/03-delhivery-q4-fy24-earnings-presentation.pdf", "needle": "8,142", "why": "FY24 revenue from services (corroboration case)"},
+    {"doc": "delhivery/03-delhivery-q4-fy24-earnings-presentation.pdf", "needle": "2,076", "why": "Q4 FY24 revenue (period containment case)"},
+    {"doc": "delhivery/02-delhivery-annual-report-fy24-excerpt.pdf", "needle": "74,540.82", "why": "FY24 revenue standalone (scope case)"},
+    {"doc": "delhivery/02-delhivery-annual-report-fy24-excerpt.pdf", "needle": "85,942.34", "why": "FY24 total income (measure-basis case)"},
+    {"doc": "delhivery/02-delhivery-annual-report-fy24-excerpt.pdf", "needle": "resigned from the Board with effect", "why": "director cessation (supersession case)"},
+    {"doc": "delhivery/01-delhivery-prospectus-2022-excerpt.pdf", "needle": "Sandeep Kumar Barasia is an Executive Director", "why": "director active in 2022 (supersession case, prose page)"},
+    {"doc": "india-macroeconomy/01-india-economic-survey-2024-25-excerpt.pdf", "needle": "6.3 and 6.8 per cent", "why": "FY26 growth range (prose forecast page)"},
+    {"doc": "india-macroeconomy/02-rbi-annual-report-2024-25-excerpt.pdf", "needle": "is projected at 6.5 per cent", "why": "FY26 growth point estimate"},
+    {"doc": "india-macroeconomy/03-imf-india-2025-article-iv-excerpt.pdf", "needle": "projected at 6.6 percent", "why": "FY26 growth, later vintage"}
+  ]
+}
