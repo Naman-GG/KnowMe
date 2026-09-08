@@ -92,7 +92,8 @@
     <button class="f" data-v="complementary">Complementary</button>
     <button class="f" data-v="supersedes">Supersedes</button>
     <button class="f" data-v="underspecified">Underspecified</button>
-    <button class="f" id="xdoc" data-on="0">Cross-document only</button>
+    <button class="f" id="xdoc">Cross-document only</button>
+    <button class="f" id="fails">Rejected claims</button>
     <div class="up">
       <input type="file" id="file" accept="application/pdf">
       <button class="f" id="send">Add PDF</button>
@@ -104,14 +105,48 @@
 
 <script>
 const $ = s => document.querySelector(s);
-let verdict = "", crossOnly = false;
+let verdict = "", crossOnly = false, showFails = false;
 
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
+async function loadFailures(){
+  const [q, sum] = await Promise.all([
+    (await fetch("/api/quarantined?limit=40")).json(),
+    (await fetch("/api/summary")).json(),
+  ]);
+  const g = sum.grounding || {};
+  const total = Object.values(g).reduce((a,b) => a+b, 0) || 1;
+  const ok = total - (g.not_found || 0);
+  const head = `<div class="card"><div class="body" style="display:block">
+      <b>Grounding across the corpus:</b> ${(100*ok/total).toFixed(1)}% of claims
+      verified against their source page &mdash;
+      ${g.exact||0} exact, ${g.fuzzy||0} normalised, ${g.gapped||0} elided,
+      <b>${g.not_found||0} rejected</b>.
+      <p>A claim whose quoted evidence cannot be found on the page it cites is
+      quarantined: kept for inspection, excluded from reconciliation. Qualifiers
+      the model invented are dropped the same way and shown struck through.</p>
+    </div></div>`;
+  $("#list").innerHTML = head + (q.length ? q.map(c => `
+    <div class="card"><div class="body" style="display:block">
+      <div class="doc">${esc(c.document || c.doc_id)} &middot; pdf p.${c.evidence.page}</div>
+      <div class="m">${esc(c.measure)} = ${esc(c.value)}</div>
+      <div class="s">${esc(c.reason || "evidence not found")}</div>
+      <blockquote>${esc(c.evidence.quote)}</blockquote>
+    </div></div>`).join("")
+    : `<div class="empty">No rejected claims.</div>`);
+}
+
 async function stats(){
   const s = await (await fetch("/api/summary")).json();
   const v = s.verdicts || {};
+  // Put the counts on the filters so the shape of the corpus is visible.
+  document.querySelectorAll("button.f[data-v]").forEach(b => {
+    const key = b.dataset.v;
+    const n = key ? (v[key] || 0) : Object.values(v).reduce((a,c) => a+c, 0);
+    b.textContent = b.textContent.replace(/\s*\(\d+\)$/, "") + ` (${n})`;
+  });
+  $("#fails").textContent = `Rejected claims (${s.claims_quarantined})`;
   $("#stats").innerHTML = `
     <div><b>${s.documents}</b> <span>documents</span></div>
     <div><b>${s.claims_active}</b> <span>claims</span></div>
@@ -167,11 +202,21 @@ function card(r){
   </div>`;
 }
 
+// A reviewer wants the conflicts first. Left unsorted, the "All" view opens on
+// a wall of near-identical COMPLEMENTARY rows and buries the 9 corroborations
+// and 25 contradictions that are the point of the exercise.
+const PRIORITY = {contradicts:0, corroborates:1, supersedes:2, complementary:3, underspecified:4};
+
 async function load(){
-  const qs = new URLSearchParams({limit:"60"});
+  if (showFails) return loadFailures();
+  const qs = new URLSearchParams({limit:"120"});
   if (verdict) qs.set("verdict", verdict);
   if (crossOnly) qs.set("cross_doc", "true");
-  const rows = await (await fetch("/api/relations?" + qs)).json();
+  let rows = await (await fetch("/api/relations?" + qs)).json();
+  rows.sort((a,b) =>
+    (PRIORITY[a.verdict] - PRIORITY[b.verdict])
+    || (b.cross_doc - a.cross_doc)
+    || (b.confidence - a.confidence));
   $("#list").innerHTML = rows.length ? rows.map(card).join("")
     : `<div class="empty">No relations match this filter.<br>Add a PDF, or run
        <code>python scripts/ingest.py --all</code>.</div>`;
@@ -183,8 +228,12 @@ $("#filters").addEventListener("click", e => {
   const b = e.target.closest("button.f"); if (!b) return;
   if (b.id === "xdoc"){
     crossOnly = !crossOnly; b.setAttribute("aria-pressed", crossOnly);
+    showFails = false; $("#fails").setAttribute("aria-pressed", false);
+  } else if (b.id === "fails"){
+    showFails = !showFails; b.setAttribute("aria-pressed", showFails);
   } else if (b.dataset.v !== undefined){
-    verdict = b.dataset.v;
+    verdict = b.dataset.v; showFails = false;
+    $("#fails").setAttribute("aria-pressed", false);
     document.querySelectorAll("button.f[data-v]").forEach(x =>
       x.setAttribute("aria-pressed", x === b));
   } else return;

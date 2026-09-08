@@ -198,6 +198,27 @@ A tempting shortcut was rejected: matching subjects by token containment would
 link "India" to "Reserve Bank of India", but equally "America" to "Bank of
 America", inventing agreement between a country and a company.
 
+### An extraction error that only reconciliation could catch
+The earnings deck yielded `express parcel shipments = 7,224 Mn` for FY24. The
+annual report says 740 million. The reconciler flagged the pair as
+CONTRADICTS -- correctly, because one of them is wrong.
+
+The claim's own quote gives it away:
+
+```
+'Express Parcel shipments\n(₹ Cr)\nPTL freight tonnage(2)\n(‘000 Tons)\n8\nYoY: 11%'
+```
+
+The model read a figure off a slide carrying several charts and attached it to
+the wrong label -- the quote even contains `(₹ Cr)`, a currency unit, while the
+claim records `Mn` shipments.
+
+**Grounding could not have caught this.** The quote is genuinely on the page, so
+it verified as `exact`. Checking that evidence exists says nothing about whether
+the model attached it to the right thing. It took a second document disagreeing
+to expose the error, which is an argument for the whole approach: a knowledge
+layer finds mistakes that per-document validation structurally cannot.
+
 ## Cases located in the starter corpus
 
 | Case | Evidence |

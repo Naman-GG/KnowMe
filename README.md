@@ -49,8 +49,11 @@ Upload further PDFs through the UI, or:
 Useful extras:
 
 ```bash
-.venv/bin/python scripts/audit.py            # adversarial audit of the results
-.venv/bin/python scripts/eval_triage.py --sweep   # page-selection recall
+.venv/bin/python scripts/demo.py                 # the four required cases, from live data
+.venv/bin/python scripts/audit.py                # adversarial audit of the results
+.venv/bin/python scripts/rebuild.py              # re-normalise + re-reconcile, no model calls
+.venv/bin/python scripts/refresh_subjects.py     # re-profile documents, propagate subjects
+.venv/bin/python scripts/eval_triage.py --sweep  # page-selection recall
 ```
 
 **A note on rate limits.** Groq's free tier allows 8,000 tokens per minute, and
@@ -214,6 +217,14 @@ PDF → ingest ─→ triage ─→ profile ─→ extract ─→ ground ─→ 
 Only `extract` and the registry's ambiguous-pair adjudication cost money.
 Everything else is deterministic and unit-tested.
 
+**Improving the deterministic layers is free.** Every claim keeps the period and
+unit strings the document actually used, so a better parser can be re-applied to
+claims already stored. `scripts/rebuild.py` re-normalises and re-reconciles the
+whole corpus with **no model calls** — when month-range periods started parsing
+correctly, it corrected three false contradictions across 1,249 stored claims in
+under a second. Only extraction ever costs money, and it never has to be repeated
+to benefit from a fix downstream of it.
+
 **Incrementality** falls out of two earlier decisions: document ids are content
 hashes (re-adding a file is a no-op), and reconciliation is blocked on
 (subject, measure), so a new document is only compared against claims sharing
@@ -227,6 +238,55 @@ those keys. Adding the sixth document does not re-examine the first five.
   deliberately on a free tier so reviewers can run this without an account.
 
 ---
+
+## Results on the starter corpus
+
+```
+6 documents · 1,700 claims (1,589 active, 111 quarantined)
+1,144 relations · 307 cross-document
+grounding 93.5%  (435 exact · 754 normalised · 400 elided · 111 rejected)
+verdicts: 611 underspecified · 488 complementary · 28 contradicts · 17 corroborates
+```
+
+Run `python scripts/demo.py` to print the four required cases from the live
+database. All four are found by searching the stored relations for the *shapes*
+the brief describes — no document, figure or page is hardcoded.
+
+**Case 1 — corroboration across documents.** Two independent institutions on the
+same fact, phrased and spelled differently:
+
+```
+[CORROBORATES] core inflation
+   3.5 per cent   RBI Annual Report   period = '2024-25'
+   3.5 percent    IMF Article IV      period = 'FY2024/25 average'
+   period check: '2024-25' [2024-04-01→2025-03-31] EQUALS 'FY2024/25 average' [same]
+```
+
+and across units, between Delhivery's results deck and its annual report — with
+the reported/adjusted distinction preserved on both sides:
+
+```
+[CORROBORATES] reported EBITDA    127 ₹ Cr  vs  1,266.41 ₹ Million
+[CORROBORATES] adjusted EBITDA     76 ₹ Cr  vs    757.86 ₹ Million
+```
+
+**Case 2 — a genuine contradiction.** Same measure, period, scope and basis;
+values 8.7% apart, with nothing in the qualifiers to explain it:
+
+```
+[CONTRADICTS] loss before tax
+   -8,987.45 ₹ million   prospectus p.94   "Restated loss before tax (8,987.45)"
+   -9,839.09 ₹ million   prospectus p.103  "Loss before tax (V= III+IV) (9,839.09)"
+```
+
+**Case 3 — apparent contradictions explained by context.** Three distinct
+mechanisms, all demonstrable: period containment (Q4 FY24 nested in FY24, with
+the arithmetic check confirming 20.76bn ≤ 81.42bn), reporting basis (reported vs
+adjusted EBITDA), and disjoint periods.
+
+**Case 4 — failures found and handled.** 111 quarantined claims, 16/16 fabricated
+scopes caught on a single slide, and the extraction error below that only
+cross-document reconciliation could expose.
 
 ## Findings
 
@@ -272,6 +332,26 @@ contiguous span quarantined 173 of 280 claims, nearly all of them true.
 The right test is not "is this span contiguous" but "**do all the quote's
 tokens appear on the page, in order**". Grounding went **38% → 85%**. It still
 rejects fabricated figures and scrambled tokens, both of which are tested.
+
+### An extraction error that only cross-document reconciliation could catch
+
+The earnings deck yielded `express parcel shipments = 7,224 Mn` for FY24; the
+annual report says **740 million**. Flagged CONTRADICTS — correctly, because one
+of them is wrong. The claim's own quote shows which:
+
+```
+'Express Parcel shipments\n(₹ Cr)\nPTL freight tonnage(2)\n(‘000 Tons)\n8\nYoY: 11%'
+```
+
+The model read a figure off a slide of several charts and attached it to the
+wrong label — the quote even carries `(₹ Cr)`, a currency unit, against a claim
+recording `Mn` shipments.
+
+**Grounding could not have caught this.** The quote really is on that page, so it
+verified as `exact`. Confirming that evidence exists says nothing about whether
+the model attached it to the right thing. It took a second document disagreeing.
+That is the argument for building a knowledge layer at all: it finds errors that
+per-document validation structurally cannot.
 
 ### Publisher mistaken for subject — the failure that produces silence
 
@@ -322,16 +402,14 @@ code.
 Full version in [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md), which separates
 what is principled from what is tuned to this corpus. The most important:
 
-**Corpus coverage is incomplete.** Groq's free tier allows 200,000 tokens per
-day; extraction costs ~4,000 tokens per page and the corpus is 511 pages —
-roughly six days of allowance. Two of six documents (the Delhivery annual
-report and the Economic Survey) have **zero** claims because their pages were
-never extracted, and every corpus number quoted here comes from the other four.
-The pipeline reports this as `pages_skipped_no_quota` rather than implying it
-read what it did not. The most visible cost is that the headline cross-document
-corroboration (the deck's ₹8,142 Cr against the annual report's ₹81,415.38 mn)
-cannot be shown end-to-end — it is proven in `tests/test_reconcile.py` against
-the real figures, but the annual report is not in the database.
+**Corpus coverage is partial.** Groq's free tier allows 200,000 tokens per day;
+extraction costs ~4,000 tokens per page and the corpus is 511 pages — roughly
+six days of allowance. Five of six documents are represented, most of them from
+a capped page budget rather than in full, and the Economic Survey has **zero**
+claims because its pages were never extracted. The pipeline reports this as
+`pages_skipped_no_quota` rather than implying it read what it did not, but the
+corpus numbers below describe what was actually processed, not the whole 511
+pages.
 
 **There is no labelled ground truth, so there are no real precision or recall
 numbers for extraction or reconciliation.** `scripts/eval_triage.py` reports 9/9,
@@ -376,5 +454,5 @@ OCR for scanned PDFs, which currently yield nothing.
 | `src/factlayer/pipeline.py` | End-to-end, incremental ingestion |
 | `src/factlayer/db.py` | SQLite store |
 | `src/factlayer/api.py` + `web/` | API and the disagreement inbox |
-| `scripts/` | `ingest`, `audit`, `eval_triage` |
+| `scripts/` | `ingest`, `demo`, `audit`, `rebuild`, `refresh_subjects`, `eval_triage` |
 | `docs/` | `DECISIONS.md`, `LIMITATIONS.md` |

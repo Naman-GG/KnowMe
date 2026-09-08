@@ -224,7 +224,18 @@ class Store:
             args.append(verdict)
         if cross_doc_only:
             sql += " AND cross_doc = 1"
-        sql += " ORDER BY confidence DESC LIMIT ? OFFSET ?"
+        # Order by how much a reviewer needs to see it, not by confidence.
+        # Confidence-first buried every contradiction: COMPLEMENTARY verdicts
+        # carry 0.9 and CONTRADICTS 0.85, so the conflicts fell outside the
+        # first page of results and the client had nothing to re-sort.
+        sql += """ ORDER BY CASE verdict
+                     WHEN 'contradicts'    THEN 0
+                     WHEN 'corroborates'   THEN 1
+                     WHEN 'supersedes'     THEN 2
+                     WHEN 'complementary'  THEN 3
+                     ELSE 4 END,
+                   cross_doc DESC, confidence DESC
+                   LIMIT ? OFFSET ?"""
         args += [limit, offset]
         rows = self._conn.execute(sql, args).fetchall()
         return [Relation.model_validate_json(r["relation_json"]) for r in rows]
