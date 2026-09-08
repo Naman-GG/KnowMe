@@ -46,7 +46,10 @@ def show(rel: Relation, store: Store, docs: dict[str, str]) -> None:
                 ("as_of", q.as_of), ("type", q.estimate_type),
             ) if v
         ) or "no qualifiers stated"
-        page = f"p.{c.evidence.printed_page}" if c.evidence.printed_page else f"pdf p.{c.evidence.page_no}"
+        # Always show the PDF page: it is the one a reader can actually turn to.
+        page = f"pdf p.{c.evidence.page_no}"
+        if c.evidence.printed_page:
+            page += f" (printed {c.evidence.printed_page})"
         print(f"  {label}  {c.measure_raw}  =  {c.display_value()}")
         print(f"     {quals}")
         print(f"     {docs.get(c.doc_id, c.doc_id)} · {page} · grounding={c.evidence.grounding.value}")

@@ -67,6 +67,17 @@ _FY = re.compile(
 _SPAN = re.compile(r"\b(?P<y1>(?:19|20)\d{2})\s*[-/–]\s*(?P<y2>\d{2,4})\b")
 # Half year: "H1 FY24"
 _HALF = re.compile(r"\bH(?P<h>[12])\s*FY\s*(?P<y>\d{2,4})\b", re.IGNORECASE)
+# "April-December 2024", "April - November 2024", "April to December 2024".
+# Statistical releases report part-year spans this way constantly, and without
+# this the year alone was matched: "April-December 2024" resolved to the whole
+# of 2024 and then compared EQUAL to it, inventing contradictions between a
+# nine-month figure and a twelve-month one.
+_MONTH_RANGE = re.compile(
+    rf"\b(?P<m1>{_MONTH_RE})\s*(?:[-–—]|to)\s*(?P<m2>{_MONTH_RE})[,\s]+(?P<y>\d{{4}})\b",
+    re.IGNORECASE,
+)
+# A calendar half-year: "H1 2024".
+_CAL_HALF = re.compile(r"\bH(?P<h>[12])\s*(?P<y>(?:19|20)\d{2})\b", re.IGNORECASE)
 # A lone calendar year.
 _CY = re.compile(r"\b(?P<y>(?:19|20)\d{2})\b")
 
@@ -172,6 +183,19 @@ def parse_period(label: str | None) -> Period | None:
         if y2 == y1 + 1:
             s, e = fiscal_year(y2)
             return Period(label=text, start=s, end=e)
+
+    if (m := _MONTH_RANGE.search(text)):
+        m1, m2 = MONTHS[m.group("m1").lower()], MONTHS[m.group("m2").lower()]
+        year = int(m.group("y"))
+        # A range that wraps ("November-February 2025") ends in the next year.
+        end_year = year if m2 >= m1 else year + 1
+        return Period(label=text, start=dt.date(year, m1, 1), end=_eom(end_year, m2))
+
+    if (m := _CAL_HALF.search(text)):
+        year = int(m.group("y"))
+        start_month = 1 if m.group("h") == "1" else 7
+        return Period(label=text, start=dt.date(year, start_month, 1),
+                      end=_eom(year, start_month + 5))
 
     if (m := _CY.search(text)):
         y = int(m.group("y"))

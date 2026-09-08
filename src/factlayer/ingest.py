@@ -79,13 +79,20 @@ def _printed_page_number(text: str) -> str | None:
     """Best-effort read of the page number printed on the page.
 
     Our excerpts keep the original documents' numbering, so PDF position and
-    printed page diverge. Citations should quote what a reader would see.
+    printed page diverge; citations should quote what a reader would see.
+
+    Only the outermost couple of lines are considered, and a candidate must be
+    the entire line. Scanning a 200-character window instead picked up figures
+    out of the body -- a slide reading "740 Mn / Express parcel shipments" was
+    cited as page 740 of a 27-page deck, which is worse than having no printed
+    number at all.
     """
-    head, tail = text[:200], text[-200:]
-    for chunk in (tail, head):
-        matches = _PRINTED_PAGE.findall(chunk)
-        if matches:
-            return matches[-1]
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return None
+    for candidate in (*lines[-2:], *lines[:2]):
+        if candidate.isdigit() and len(candidate) <= 4:
+            return candidate
     return None
 
 

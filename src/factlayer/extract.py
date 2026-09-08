@@ -60,8 +60,8 @@ Below are the opening pages of a document (filename: {filename}).
 
 Return JSON with exactly these keys:
 {{
-  "publisher": string | null,        // organisation that issued it
-  "subject": string | null,          // the main entity it is about
+  "publisher": string | null,        // organisation that ISSUED the document
+  "subject": string | null,          // the entity its FACTS DESCRIBE
   "doc_type": string | null,         // e.g. annual report, prospectus, staff report
   "as_of_date": "YYYY-MM-DD" | null, // the date the document speaks as of
   "default_period": string | null,   // main reporting period, e.g. "FY24", "2024-25"
@@ -71,6 +71,19 @@ Return JSON with exactly these keys:
 }}
 
 Rules:
+- "publisher" and "subject" are usually DIFFERENT, and confusing them is the
+  single most damaging mistake you can make here. The publisher wrote the
+  document; the subject is what its numbers are about.
+    * A central bank's annual report on the economy: publisher is the central
+      bank, subject is the COUNTRY.
+    * An IMF country report: publisher is the IMF, subject is the COUNTRY.
+    * A statistical agency's inflation release: publisher is the agency,
+      subject is the country or the price index population.
+  They coincide only when an organisation reports on ITSELF -- a company's own
+  annual report or results presentation, where the figures are that company's
+  revenue and profit.
+- Ask: whose revenue, whose GDP, whose inflation do the numbers measure? That
+  is the subject.
 - Use only what the text states or clearly shows. Use null when it is not stated.
 - as_of_date is when the document was issued or the date its data runs to.
   If only a month or year is given, use the last day of that month or year.
@@ -218,8 +231,16 @@ def _validate_claims(data: Any) -> None:
                 raise ValueError(f'each claim needs a non-empty "{required}"')
 
 
-async def profile_document(doc: Document, llm: LLMClient) -> DocProfile:
-    """Establish document-level defaults from its opening pages."""
+async def profile_document(
+    doc: Document, llm: LLMClient, *, raise_on_error: bool = False
+) -> DocProfile:
+    """Establish document-level defaults from its opening pages.
+
+    Ingestion wants a failed profile to degrade to empty defaults rather than
+    abort a whole document. Callers that are specifically repairing a profile
+    need the opposite -- an empty result there is indistinguishable from "the
+    document genuinely states nothing", so they pass `raise_on_error`.
+    """
     head = "\n\n".join(p.text for p in doc.pages[:3])[:MAX_PAGE_CHARS]
     try:
         data = await llm.json_call(
@@ -228,6 +249,8 @@ async def profile_document(doc: Document, llm: LLMClient) -> DocProfile:
             validate=_validate_profile,
         )
     except LLMError as exc:
+        if raise_on_error:
+            raise
         log.warning("profiling failed for %s: %s", doc.filename, exc)
         return DocProfile()
 

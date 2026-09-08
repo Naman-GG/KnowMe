@@ -153,6 +153,51 @@ correct vs. incorrect decomposition fixed it: `measure "EBITDA", basis
 
 ---
 
+### Partly-overlapping periods slipped through the reconciler
+The period branches handled `equals`, `before`/`after` and `contains`/`during`,
+but not `overlaps`. Two prospectus figures -- a twelve-month
+"year ended March 31, 2021" and a nine-month stub ending December 2021 -- landed
+0.4% apart and were reported as **corroborating each other**. The same hole
+produced false contradictions when overlapping-period values differed. Partial
+overlap now yields COMPLEMENTARY: neither period contains the other, so the
+figures cover different spans and are not comparable.
+
+### A part-year period parsed as the whole year
+`"April-December 2024"` matched only the trailing year and resolved to all of
+2024, so it compared EQUAL to `"2024"` -- making a nine-month RBI figure
+contradict a twelve-month IMF one. Month ranges and calendar halves are now
+parsed properly, including ranges that wrap into the next year.
+
+### A page citation that pointed nowhere
+The printed-page heuristic scanned a 200-character window and picked numbers out
+of body text: a slide reading "740 Mn / Express parcel shipments" was cited as
+**page 740 of a 27-page deck**. Worse, the display preferred the printed number
+and hid the real PDF page. Now only whole lines at the very top or bottom of a
+page count, and both numbers are always shown.
+
+### Publisher mistaken for subject -- the failure that produced silence
+The RBI and IMF documents shared **zero** relations despite both reporting
+Indian GDP growth and inflation. Profiling had recorded the RBI report's subject
+as `Reserve Bank of India` -- its publisher -- rather than `India`, and because
+the extraction prompt passes the profile's subject in as context, all 198 of its
+claims inherited it. Reconciliation blocks on (subject, measure), so one
+mislabel silently suppressed every cross-document comparison.
+
+This is the failure mode the system is least able to see: a wrong value surfaces
+as a contradiction, a wrong subject produces nothing at all, and nothing looks
+exactly like "these documents have nothing in common".
+
+Fixed by making the profiling prompt distinguish the organisation that *issued*
+a document from the entity its facts *describe*, then re-profiling and
+propagating the correction to the claims that had inherited the stale subject
+(`scripts/refresh_subjects.py`). Re-extraction was not needed -- the claims
+themselves were sound. Cross-document relations went 96 -> 111 and the first
+cross-institution corroboration appeared.
+
+A tempting shortcut was rejected: matching subjects by token containment would
+link "India" to "Reserve Bank of India", but equally "America" to "Bank of
+America", inventing agreement between a country and a company.
+
 ## Cases located in the starter corpus
 
 | Case | Evidence |

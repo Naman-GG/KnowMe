@@ -74,3 +74,31 @@ def test_undatable_period_is_reported_not_guessed():
 def test_no_time_expression_returns_none():
     assert parse_period("") is None
     assert parse_period(None) is None
+
+
+@pytest.mark.parametrize(
+    "label,start,end",
+    [
+        ("April-December 2024", D(2024, 4, 1), D(2024, 12, 31)),
+        ("April – November 2024", D(2024, 4, 1), D(2024, 11, 30)),
+        ("April to December 2024", D(2024, 4, 1), D(2024, 12, 31)),
+        ("November-February 2025", D(2025, 11, 1), D(2026, 2, 28)),
+        ("H1 2024", D(2024, 1, 1), D(2024, 6, 30)),
+        ("H2 2024", D(2024, 7, 1), D(2024, 12, 31)),
+    ],
+)
+def test_month_ranges_and_calendar_halves(label, start, end):
+    p = parse_period(label)
+    assert p is not None and (p.start, p.end) == (start, end), label
+
+
+def test_part_year_is_not_the_whole_year():
+    """The RBI reported "April-December 2024" and the IMF "2024".
+
+    Parsing the part-year as the full year made them compare EQUAL, so a
+    nine-month figure and a twelve-month one were reported as contradicting.
+    """
+    part = parse_period("April-December 2024")
+    whole = parse_period("2024")
+    assert relate(part, whole) != "equals"
+    assert relate(whole, part) == "contains"

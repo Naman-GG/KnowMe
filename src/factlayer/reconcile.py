@@ -79,9 +79,16 @@ def compare_values(a: Claim, b: Claim, tolerance: float = VALUE_TOLERANCE) -> Ag
         gap = min(abs(ia[0] - ib[1]), abs(ib[0] - ia[1]))
         scale = max(abs(ia[0]), abs(ia[1]), abs(ib[0]), abs(ib[1]), 1e-9)
         rel = gap / scale
+        # When the values are themselves percentages, "differ by 3.1%" is
+        # ambiguous -- it reads as percentage points but means a relative gap.
+        # Spell out both so a reader can judge the size of the disagreement.
+        if (a.quantity and a.quantity.dimension == "percent"):
+            size = f"{gap:.2f} percentage points ({rel:.1%} relative)"
+        else:
+            size = f"{rel:.1%}"
         if rel <= tolerance:
-            return Agreement(True, f"{_fmt(a)} vs {_fmt(b)} differ by {rel:.3%} (within rounding)")
-        return Agreement(False, f"{_fmt(a)} vs {_fmt(b)} differ by {rel:.1%}")
+            return Agreement(True, f"{_fmt(a)} vs {_fmt(b)} differ by {size} (within rounding)")
+        return Agreement(False, f"{_fmt(a)} vs {_fmt(b)} differ by {size}")
 
     if a.value_kind is ValueKind.DATE and b.value_kind is ValueKind.DATE:
         same = a.date_value == b.date_value

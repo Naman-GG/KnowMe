@@ -273,6 +273,36 @@ The right test is not "is this span contiguous" but "**do all the quote's
 tokens appear on the page, in order**". Grounding went **38% → 85%**. It still
 rejects fabricated figures and scrambled tokens, both of which are tested.
 
+### Publisher mistaken for subject — the failure that produces silence
+
+The RBI Annual Report and the IMF Article IV report share **zero** relations,
+despite both reporting Indian GDP growth and inflation over overlapping
+periods. The cause:
+
+```
+RBI claims  ->  subject_key = 'reserve bank of india'   (194 of 229)
+IMF claims  ->  subject_key = 'india'                   (196 of 199)
+```
+
+The extractor recorded the RBI report's subject as its **publisher** rather
+than the entity its facts describe — a central bank's annual report is about
+the economy, not the bank. Reconciliation blocks on (subject, measure), so that
+single mislabel silently suppressed every comparison between the two documents.
+
+This is the failure mode the system is least able to see. A wrong *value*
+surfaces as a contradiction; a wrong *subject* produces **no output at all**,
+and an empty result is indistinguishable from "these documents have nothing in
+common". It was found only by asking why an expected comparison was missing,
+which is what `scripts/audit.py` is for.
+
+The fix is two prompt changes (profiling must separate publisher from subject).
+It is deliberately **not applied in this commit**: changing the extraction
+prompt changes every cache key, and with the daily token allowance spent it
+cannot be re-run — applying it would leave a repository whose code cannot
+reproduce its own stored results. The diagnosis and the rejected shortcut are in
+[`docs/LIMITATIONS.md`](docs/LIMITATIONS.md), and
+`tests/test_subject_resolution.py` pins the behaviour so the fix is verifiable.
+
 ### An arithmetic check that was wrong for profit
 
 "A part cannot exceed the whole" fired on `Q3 FY24 EBITDA = ₹109 Cr` vs
@@ -291,6 +321,17 @@ code.
 
 Full version in [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md), which separates
 what is principled from what is tuned to this corpus. The most important:
+
+**Corpus coverage is incomplete.** Groq's free tier allows 200,000 tokens per
+day; extraction costs ~4,000 tokens per page and the corpus is 511 pages —
+roughly six days of allowance. Two of six documents (the Delhivery annual
+report and the Economic Survey) have **zero** claims because their pages were
+never extracted, and every corpus number quoted here comes from the other four.
+The pipeline reports this as `pages_skipped_no_quota` rather than implying it
+read what it did not. The most visible cost is that the headline cross-document
+corroboration (the deck's ₹8,142 Cr against the annual report's ₹81,415.38 mn)
+cannot be shown end-to-end — it is proven in `tests/test_reconcile.py` against
+the real figures, but the annual report is not in the database.
 
 **There is no labelled ground truth, so there are no real precision or recall
 numbers for extraction or reconciliation.** `scripts/eval_triage.py` reports 9/9,

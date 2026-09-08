@@ -101,3 +101,14 @@ def test_out_of_order_tokens_are_not_grounded():
     p = Page(page_no=1, text="revenue from services was 8,142 Cr in FY24")
     status, _, _ = locate_quote("FY24 8,142 services revenue from was Cr in", p)
     assert status is GroundingStatus.NOT_FOUND
+
+
+def test_printed_page_ignores_numbers_in_body_text():
+    """A slide reading "740 Mn" must not be cited as page 740."""
+    from factlayer.ingest import _printed_page_number
+
+    slide = "740 Mn\nExpress parcel shipments in FY24\nYoY: 11.5%\n8,142 Cr\n"
+    assert _printed_page_number(slide) is None
+
+    numbered = "Annual Report 2024-25\nsome body text here\n27\n"
+    assert _printed_page_number(numbered) == "27"

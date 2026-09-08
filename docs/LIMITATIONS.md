@@ -120,6 +120,49 @@ of samples. With more time the first thing I would build is a small labelled set
 (a few hundred claims with correct qualifiers, and a few dozen labelled pairs)
 so that tuning is measured instead of eyeballed.
 
+## 4a. The most consequential failure found: publisher mistaken for subject
+
+**Symptom.** The RBI Annual Report and the IMF Article IV report produce
+**zero** cross-document relations between them, despite both reporting Indian
+GDP growth, inflation and the fiscal position for overlapping periods.
+
+**Diagnosis.**
+
+```
+RBI claims  ->  subject_key = 'reserve bank of india'   (194 of 229)
+IMF claims  ->  subject_key = 'india'                   (196 of 199)
+```
+
+The extractor recorded the RBI document's subject as its **publisher** rather
+than as the entity its facts describe. A central bank's annual report is about
+the economy, not about the bank. Because reconciliation blocks on
+(subject, measure), that one mislabel silently suppressed every comparison
+between the two documents.
+
+**Why it is worth reporting.** This is the failure mode this project is least
+able to see. A wrong *value* shows up as a contradiction; a wrong *subject*
+produces no output at all, and an empty result looks exactly like "these
+documents have nothing in common". It was found only by asking why an expected
+comparison was missing — which is why `scripts/audit.py` exists.
+
+**Fix, not yet applied.** Two prompt changes: profiling must distinguish the
+organisation that *published* a document from the entity its facts *describe*,
+and extraction must be told that a claim's subject is what the figure measures,
+never the publisher's name.
+
+It is not applied in this commit for an honest reason: changing the extraction
+prompt changes the cache key for every call, and with the provider's daily
+token allowance spent, re-extracting the corpus is impossible tonight. Applying
+it would leave a repository whose code could not reproduce its own stored
+results. The diagnosis is recorded here, and
+`tests/test_subject_resolution.py` pins the current behaviour so the fix is
+verifiable when quota allows.
+
+**A partial mitigation was considered and rejected.** Subject matching could
+treat "India" as contained in "Reserve Bank of India" by token overlap. That
+would also merge "Bank of America" with "America", inventing agreement between
+a company and a country -- a worse failure than the one it fixes.
+
 ## 5. Known anomalies that remain
 
 Run `python scripts/audit.py` to reproduce these against the current database.
@@ -149,6 +192,13 @@ Run `python scripts/audit.py` to reproduce these against the current database.
 6. **Subject resolution is shallow.** Normalised string similarity merges
    `Delhivery Limited` / `Delhivery Ltd`, but would not connect a subsidiary to
    its parent, and could over-merge two similarly-named entities.
-7. **Only one PDF text layer is used.** Scanned or image-only PDFs yield
+7. **Coverage is incomplete for this run.** Groq's free tier allows 200,000
+   tokens per day; a page of extraction costs roughly 4,000, and the corpus is
+   511 pages -- about six days of allowance. Two documents (the Delhivery
+   annual report and the Economic Survey) have **zero** claims because their
+   pages were never extracted. The pipeline reports this as
+   `pages_skipped_no_quota` rather than implying full coverage, but every
+   corpus-level number below is drawn from four of six documents.
+8. **Only one PDF text layer is used.** Scanned or image-only PDFs yield
    nothing; there is no OCR fallback, and such a document would report zero
    claims rather than an error.

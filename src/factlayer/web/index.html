@@ -133,8 +133,8 @@ function qualifiers(c){
 
 function side(c, label){
   if (!c) return `<div class="side"><h4>${label}</h4><div class="doc">claim unavailable</div></div>`;
-  const p = c.evidence.printed_page ? `p.${c.evidence.printed_page} (pdf ${c.evidence.page})`
-                                    : `pdf p.${c.evidence.page}`;
+  const p = `pdf p.${c.evidence.page}`
+    + (c.evidence.printed_page ? ` (printed ${c.evidence.printed_page})` : "");
   return `<div class="side">
     <h4>${esc(c.measure)}</h4>
     <div class="doc">${esc(c.document || c.doc_id)} · ${p} · ${esc(c.evidence.grounding)}</div>
