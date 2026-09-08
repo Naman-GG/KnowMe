@@ -33,6 +33,19 @@ log = logging.getLogger(__name__)
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
 
+def _retry_after(headers, fallback: float) -> float:
+    """Read a provider's retry hint, tolerating the several spellings in use."""
+    for name in ("retry-after", "x-ratelimit-reset-requests", "x-ratelimit-reset-tokens"):
+        raw = headers.get(name)
+        if not raw:
+            continue
+        try:
+            return float(str(raw).rstrip("s"))
+        except ValueError:
+            continue
+    return fallback
+
+
 class LLMError(RuntimeError):
     pass
 
@@ -47,6 +60,7 @@ class Usage:
     completion_tokens: int = 0
     failures: int = 0
     truncations: int = 0
+    rate_limited: int = 0
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -56,6 +70,7 @@ class Usage:
             "completion_tokens": self.completion_tokens,
             "failures": self.failures,
             "truncations": self.truncations,
+            "rate_limited": self.rate_limited,
         }
 
 
@@ -97,6 +112,25 @@ class LLMClient:
         self.usage = Usage()
         self._sem = asyncio.Semaphore(settings.llm_max_concurrency)
         self._client: httpx.AsyncClient | None = None
+        self._pace_lock = asyncio.Lock()
+        self._last_request = 0.0
+
+    async def _pace(self) -> None:
+        """Keep a minimum interval between request starts.
+
+        Concurrency alone is not enough on a free tier. Four workers each
+        retrying independently produce bursts that trip a per-minute limit
+        immediately, and the whole pool then backs off together. Spacing
+        request starts keeps throughput steady and, in practice, higher.
+        """
+        if settings.llm_min_interval_s <= 0:
+            return
+        async with self._pace_lock:
+            now = asyncio.get_event_loop().time()
+            wait = settings.llm_min_interval_s - (now - self._last_request)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_request = asyncio.get_event_loop().time()
 
     # -- cache ------------------------------------------------------------
 
@@ -178,15 +212,22 @@ class LLMClient:
         url = settings.llm_base_url.rstrip("/") + "/chat/completions"
 
         # Free tiers rate-limit aggressively; back off rather than fail the run.
+        # Requests are also paced globally (see `_pace`), because bursts of
+        # concurrent calls trip the limiter far sooner than a steady stream.
         delay = 2.0
-        last: Exception | None = None
-        for attempt in range(5):
+        last: str | None = None
+        for attempt in range(settings.llm_max_attempts):
+            await self._pace()
             try:
                 r = await self._client.post(url, json=body, headers=headers)
                 if r.status_code == 429 or r.status_code >= 500:
-                    retry_after = float(r.headers.get("retry-after", delay))
-                    await asyncio.sleep(min(retry_after, 30) + random.uniform(0, 1))
-                    delay = min(delay * 2, 30)
+                    # Record why, so exhausting the retries reports something
+                    # useful instead of "failed after retries: None".
+                    last = f"HTTP {r.status_code}: {r.text[:160]}"
+                    self.usage.rate_limited += r.status_code == 429
+                    retry_after = _retry_after(r.headers, delay)
+                    await asyncio.sleep(min(retry_after, 60) + random.uniform(0, 1))
+                    delay = min(delay * 2, 60)
                     continue
                 if r.status_code == 400 and "reasoning_effort" in r.text:
                     # Provider does not know the parameter; drop it and retry.
@@ -214,10 +255,12 @@ class LLMClient:
             except LLMError:
                 raise
             except (httpx.HTTPError, KeyError, IndexError) as exc:
-                last = exc
+                last = f"{type(exc).__name__}: {exc}"
                 await asyncio.sleep(delay + random.uniform(0, 1))
-                delay = min(delay * 2, 30)
-        raise LLMError(f"LLM request failed after retries: {last}")
+                delay = min(delay * 2, 60)
+        raise LLMError(
+            f"giving up after {settings.llm_max_attempts} attempts; last error: {last}"
+        )
 
     # -- public API -------------------------------------------------------
 

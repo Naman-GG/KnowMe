@@ -127,6 +127,7 @@ class Qualifiers(BaseModel):
 class GroundingStatus(str, Enum):
     EXACT = "exact"          # quote found verbatim in the page text
     FUZZY = "fuzzy"          # found after whitespace/ligature normalisation
+    GAPPED = "gapped"        # every token present in order, but the model elided
     NOT_FOUND = "not_found"  # quote is not on the cited page -> quarantine
 
 

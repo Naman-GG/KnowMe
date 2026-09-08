@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fact Knowledge Layer</title>
+<style>
+  :root {
+    --bg:#fbfaf8; --panel:#fff; --ink:#1a1917; --muted:#6b6862; --line:#e4e0d9;
+    --accent:#2f5d50; --ok:#2f7a4f; --bad:#b3261e; --warn:#8a6d1f; --info:#2c5aa0;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{--bg:#16181a;--panel:#1e2124;--ink:#e8e6e3;--muted:#9a978f;--line:#2f3337;
+          --accent:#7fbfa8;--ok:#6fbf8a;--bad:#e8837c;--warn:#d6b95c;--info:#87b0e8;}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;}
+  header{padding:20px 24px;border-bottom:1px solid var(--line);background:var(--panel);
+         position:sticky;top:0;z-index:5}
+  h1{margin:0;font-size:17px;letter-spacing:-.01em}
+  .sub{color:var(--muted);font-size:12.5px;margin-top:3px}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+  .stats{display:flex;gap:22px;flex-wrap:wrap;margin-top:12px;font-size:12.5px}
+  .stats b{font-variant-numeric:tabular-nums}
+  .stats span{color:var(--muted)}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:16px 0}
+  button.f{border:1px solid var(--line);background:var(--panel);color:var(--ink);
+     padding:6px 12px;border-radius:999px;cursor:pointer;font-size:12.5px;font-family:inherit}
+  button.f[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.f:hover{border-color:var(--accent)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+        margin-bottom:12px;overflow:hidden}
+  .head{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;cursor:pointer}
+  .head:hover{background:color-mix(in srgb,var(--accent) 5%,transparent)}
+  .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;
+       padding:3px 8px;border-radius:5px;white-space:nowrap;border:1px solid}
+  .corroborates{color:var(--ok);border-color:var(--ok)}
+  .contradicts{color:var(--bad);border-color:var(--bad)}
+  .complementary{color:var(--info);border-color:var(--info)}
+  .supersedes{color:var(--accent);border-color:var(--accent)}
+  .underspecified{color:var(--warn);border-color:var(--warn)}
+  .sum{flex:1;min-width:0}
+  .sum .m{font-weight:600}
+  .sum .s{color:var(--muted);font-size:12.5px;margin-top:2px}
+  .xd{font-size:10.5px;color:var(--muted);border:1px solid var(--line);
+      padding:2px 6px;border-radius:4px;white-space:nowrap}
+  .body{display:none;border-top:1px solid var(--line);padding:16px}
+  .card.open .body{display:block}
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:760px){.pair{grid-template-columns:1fr}}
+  .side{border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--bg)}
+  .side h4{margin:0 0 2px;font-size:13px}
+  .doc{color:var(--muted);font-size:11.5px;font-family:var(--mono);margin-bottom:8px;
+       word-break:break-all}
+  .val{font-family:var(--mono);font-size:16px;margin:6px 0}
+  .quals{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}
+  .q{font-size:11px;font-family:var(--mono);border:1px solid var(--line);
+     padding:2px 6px;border-radius:4px;color:var(--muted)}
+  .q.drop{border-color:var(--bad);color:var(--bad);text-decoration:line-through}
+  blockquote{margin:8px 0 0;padding:8px 10px;border-left:2px solid var(--accent);
+             background:var(--panel);font-size:12.5px;color:var(--muted);
+             white-space:pre-wrap;word-break:break-word}
+  .trace{margin-top:16px;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .trace h5{margin:0;padding:8px 12px;font-size:11px;letter-spacing:.06em;
+            text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line)}
+  .step{display:grid;grid-template-columns:22px 130px 1fr;gap:10px;padding:6px 12px;
+        font-family:var(--mono);font-size:12px;border-bottom:1px solid var(--line)}
+  .step:last-child{border-bottom:0}
+  .step .k{color:var(--muted)}
+  .o-pass{color:var(--ok)} .o-fail{color:var(--bad)}
+  .o-info{color:var(--info)} .o-blocked{color:var(--warn)}
+  .empty{padding:48px;text-align:center;color:var(--muted)}
+  .up{margin-left:auto;display:flex;gap:8px;align-items:center}
+  input[type=file]{font-size:12px;font-family:inherit;max-width:210px}
+  .note{font-size:12px;color:var(--muted);padding:8px 0}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <h1>Fact Knowledge Layer</h1>
+  <div class="sub">Claims extracted from PDFs, grounded in their source text, and reconciled against each other.</div>
+  <div class="stats" id="stats"></div>
+</div></header>
+
+<div class="wrap">
+  <div class="bar" id="filters">
+    <button class="f" data-v="" aria-pressed="true">All</button>
+    <button class="f" data-v="contradicts">Contradicts</button>
+    <button class="f" data-v="corroborates">Corroborates</button>
+    <button class="f" data-v="complementary">Complementary</button>
+    <button class="f" data-v="supersedes">Supersedes</button>
+    <button class="f" data-v="underspecified">Underspecified</button>
+    <button class="f" id="xdoc" data-on="0">Cross-document only</button>
+    <div class="up">
+      <input type="file" id="file" accept="application/pdf">
+      <button class="f" id="send">Add PDF</button>
+    </div>
+  </div>
+  <div class="note" id="note"></div>
+  <div id="list"></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let verdict = "", crossOnly = false;
+
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+async function stats(){
+  const s = await (await fetch("/api/summary")).json();
+  const v = s.verdicts || {};
+  $("#stats").innerHTML = `
+    <div><b>${s.documents}</b> <span>documents</span></div>
+    <div><b>${s.claims_active}</b> <span>claims</span></div>
+    <div><b>${s.claims_quarantined}</b> <span>quarantined</span></div>
+    <div><b>${s.relations}</b> <span>relations</span></div>
+    <div><b>${s.relations_cross_doc}</b> <span>cross-document</span></div>
+    <div><b>${(s.registry||{}).measures ?? 0}</b> <span>distinct measures</span></div>`;
+}
+
+function qualifiers(c){
+  const q = c.qualifiers || {}, out = [];
+  const add = (k, val) => { if (val) out.push(`<span class="q">${esc(k)}: ${esc(val)}</span>`); };
+  add("period", q.period); add("scope", q.scope); add("basis", q.basis);
+  add("as of", q.as_of); add("type", q.estimate_type);
+  for (const [k, val] of Object.entries(q.dropped || {}))
+    out.push(`<span class="q drop" title="not supported by the source page; dropped">${esc(k.replace("dropped_",""))}: ${esc(val)}</span>`);
+  return out.join("");
+}
+
+function side(c, label){
+  if (!c) return `<div class="side"><h4>${label}</h4><div class="doc">claim unavailable</div></div>`;
+  const p = c.evidence.printed_page ? `p.${c.evidence.printed_page} (pdf ${c.evidence.page})`
+                                    : `pdf p.${c.evidence.page}`;
+  return `<div class="side">
+    <h4>${esc(c.measure)}</h4>
+    <div class="doc">${esc(c.document || c.doc_id)} · ${p} · ${esc(c.evidence.grounding)}</div>
+    <div class="val">${esc(c.value)}</div>
+    <div class="quals">${qualifiers(c)}</div>
+    <blockquote>${esc(c.evidence.quote)}</blockquote>
+  </div>`;
+}
+
+const ICON = {pass:"✓", fail:"✕", info:"·", blocked:"!"};
+
+function card(r){
+  const steps = r.trace.map(s => `<div class="step">
+      <span class="o-${s.outcome}">${ICON[s.outcome] || "·"}</span>
+      <span class="k">${esc(s.check)}</span>
+      <span>${esc(s.detail)}</span></div>`).join("");
+  return `<div class="card">
+    <div class="head">
+      <span class="tag ${r.verdict}">${r.verdict}</span>
+      <div class="sum">
+        <div class="m">${esc(r.a ? r.a.measure : "")} — ${esc(r.a ? r.a.value : "")} vs ${esc(r.b ? r.b.value : "")}</div>
+        <div class="s">${esc(r.summary)}</div>
+      </div>
+      ${r.cross_doc ? '<span class="xd">cross-doc</span>' : ""}
+    </div>
+    <div class="body">
+      <div class="pair">${side(r.a,"A")}${side(r.b,"B")}</div>
+      <div class="trace"><h5>How this verdict was reached</h5>${steps}</div>
+    </div>
+  </div>`;
+}
+
+async function load(){
+  const qs = new URLSearchParams({limit:"60"});
+  if (verdict) qs.set("verdict", verdict);
+  if (crossOnly) qs.set("cross_doc", "true");
+  const rows = await (await fetch("/api/relations?" + qs)).json();
+  $("#list").innerHTML = rows.length ? rows.map(card).join("")
+    : `<div class="empty">No relations match this filter.<br>Add a PDF, or run
+       <code>python scripts/ingest.py --all</code>.</div>`;
+  document.querySelectorAll(".head").forEach(h =>
+    h.onclick = () => h.parentElement.classList.toggle("open"));
+}
+
+$("#filters").addEventListener("click", e => {
+  const b = e.target.closest("button.f"); if (!b) return;
+  if (b.id === "xdoc"){
+    crossOnly = !crossOnly; b.setAttribute("aria-pressed", crossOnly);
+  } else if (b.dataset.v !== undefined){
+    verdict = b.dataset.v;
+    document.querySelectorAll("button.f[data-v]").forEach(x =>
+      x.setAttribute("aria-pressed", x === b));
+  } else return;
+  load();
+});
+
+$("#send").onclick = async () => {
+  const f = $("#file").files[0];
+  if (!f) { $("#note").textContent = "Choose a PDF first."; return; }
+  $("#note").textContent = `Processing ${f.name}. Extraction runs page by page; this can take a few minutes.`;
+  const fd = new FormData(); fd.append("file", f);
+  try {
+    const res = await fetch("/api/documents", {method:"POST", body:fd});
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.detail || "upload failed");
+    $("#note").textContent = d.skipped
+      ? `${d.filename} is already in the knowledge layer (identical content).`
+      : `${d.filename}: ${d.claims_active} claims, ${d.claims_quarantined} quarantined, `
+        + `${d.relations_new} new relations, ${d.measures_added} new measures.`;
+    stats(); load();
+  } catch (err) { $("#note").textContent = "Error: " + err.message; }
+};
+
+stats(); load();
+</script>
+</body>
+</html>

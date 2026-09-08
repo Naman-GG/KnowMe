@@ -150,7 +150,47 @@ def _supersedes(a: Claim, b: Claim) -> Claim | None:
     return later if changeable else None
 
 
-def reconcile_pair(a: Claim, b: Claim) -> Relation | None:
+def negative_capable(claims: list[Claim]) -> set[str]:
+    """Measure keys observed taking a negative value somewhere in the corpus.
+
+    The containment inequality -- a part cannot exceed the whole it sits inside
+    -- holds only for quantities that never go negative. Revenue and tonnage
+    qualify. Profit measures do not: Delhivery's FY23 EBITDA was -452 Cr, so a
+    single profitable quarter can legitimately exceed its own full year.
+
+    Rather than hardcode which measures behave this way, we read it off the
+    corpus. If a measure has ever been seen negative, arithmetic containment is
+    not applied to it. New domains get the right answer without new code.
+    """
+    return {
+        c.measure_key
+        for c in claims
+        if c.measure_key
+        and c.quantity is not None
+        and c.quantity.canonical_low is not None
+        and c.quantity.canonical_low < 0
+    }
+
+
+def _same_page_table_rows(a: Claim, b: Claim) -> bool:
+    """Two claims from one page, same measure and qualifiers, different values.
+
+    Almost always a table whose row labels were not carried into the measure
+    name -- four expense lines each reported as "% of revenue", say. A document
+    contradicting itself twice on a single page is far less likely than an
+    extraction that lost the row heading, so this is reported as underspecified
+    rather than as a conflict.
+    """
+    return (
+        a.doc_id == b.doc_id
+        and a.evidence.page_no == b.evidence.page_no
+        and a.qualifiers.known_slots() == b.qualifiers.known_slots()
+    )
+
+
+def reconcile_pair(
+    a: Claim, b: Claim, negative_measures: set[str] | None = None
+) -> Relation | None:
     """Decide how two claims relate. Returns None if they should not be compared."""
     if a.id == b.id or a.status is not ClaimStatus.ACTIVE or b.status is not ClaimStatus.ACTIVE:
         return None
@@ -271,7 +311,7 @@ def reconcile_pair(a: Claim, b: Claim) -> Relation | None:
 
     if not is_state and period_rel in ("contains", "during"):
         outer, inner = (a, b) if period_rel == "contains" else (b, a)
-        step = _containment_check(outer, inner, "period")
+        step = _containment_check(outer, inner, "period", negative_measures)
         trace.append(step)
         if step.outcome == "fail":
             return _relation(a, b, Verdict.CONTRADICTS, 0.85,
@@ -285,7 +325,7 @@ def reconcile_pair(a: Claim, b: Claim) -> Relation | None:
 
     if scope_rel in (ScopeRelation.SUBSUMES, ScopeRelation.SUBSUMED_BY):
         outer, inner = (a, b) if scope_rel is ScopeRelation.SUBSUMES else (b, a)
-        step = _containment_check(outer, inner, "scope")
+        step = _containment_check(outer, inner, "scope", negative_measures)
         trace.append(step)
         if step.outcome == "fail":
             return _relation(a, b, Verdict.CONTRADICTS, 0.8,
@@ -327,6 +367,17 @@ def reconcile_pair(a: Claim, b: Claim) -> Relation | None:
                            outcome="pass" if agreement.agree else "fail",
                            detail=agreement.detail))
 
+    if not agreement.agree and _same_page_table_rows(a, b):
+        trace.append(TraceStep(
+            check="provenance", outcome="blocked",
+            detail=f"both read from {a.doc_id} page {a.evidence.page_no} with identical "
+                   "qualifiers; the measure name is likely missing a table row label",
+        ))
+        return _relation(a, b, Verdict.UNDERSPECIFIED, 0.5,
+                         "Cannot compare: both figures come from the same page with the same "
+                         "qualifiers, so the measure name is too coarse to tell them apart.",
+                         trace)
+
     if agreement.agree:
         cross = a.doc_id != b.doc_id
         return _relation(a, b, Verdict.CORROBORATES, 0.9 if cross else 0.75,
@@ -355,11 +406,17 @@ def reconcile_pair(a: Claim, b: Claim) -> Relation | None:
                      trace)
 
 
-def _containment_check(outer: Claim, inner: Claim, kind: str) -> TraceStep:
-    """A part cannot exceed the whole -- for quantities that add up."""
+def _containment_check(
+    outer: Claim, inner: Claim, kind: str, negative_measures: set[str] | None = None
+) -> TraceStep:
+    """A part cannot exceed the whole -- for non-negative quantities that add up."""
     if not (_is_additive(outer) and _is_additive(inner)):
         return TraceStep(check=f"{kind}-containment", outcome="info",
                          detail="measure is a rate or ratio, so it does not aggregate; no arithmetic check")
+    if negative_measures and outer.measure_key in negative_measures:
+        return TraceStep(check=f"{kind}-containment", outcome="info",
+                         detail="measure takes negative values elsewhere in the corpus, "
+                                "so a part may legitimately exceed the whole; no arithmetic check")
     io, ii = _canonical_interval(outer), _canonical_interval(inner)
     if io is None or ii is None:
         return TraceStep(check=f"{kind}-containment", outcome="info", detail="values not on a canonical scale")
@@ -390,6 +447,7 @@ def reconcile_all(claims: list[Claim], max_group: int = 400) -> list[Relation]:
     pairs of N claims is quadratic, but claims only ever need comparing when
     they are about the same thing.
     """
+    negatives = negative_capable(claims)
     groups: dict[tuple[str, str], list[Claim]] = {}
     for c in claims:
         if c.status is not ClaimStatus.ACTIVE:
@@ -403,6 +461,6 @@ def reconcile_all(claims: list[Claim], max_group: int = 400) -> list[Relation]:
             group = sorted(group, key=lambda c: -c.extraction_confidence)[:max_group]
         for i, a in enumerate(group):
             for b in group[i + 1 :]:
-                if (rel := reconcile_pair(a, b)) is not None:
+                if (rel := reconcile_pair(a, b, negatives)) is not None:
                     relations.append(rel)
     return relations

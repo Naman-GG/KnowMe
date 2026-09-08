@@ -171,3 +171,41 @@ def test_margins_are_not_arithmetically_contained():
     rel = reconcile_pair(year, quarter)
     assert rel.verdict is Verdict.COMPLEMENTARY
     assert any(s.check == "period-containment" and s.outcome == "info" for s in rel.trace)
+
+
+# --- Guarding the arithmetic check ----------------------------------------
+
+def test_containment_check_skipped_for_measures_that_go_negative():
+    """Delhivery's FY23 EBITDA was -452 Cr, so a good quarter can beat the year."""
+    from factlayer.reconcile import negative_capable
+
+    fy23 = claim("EBITDA", -452, "Rs. Cr", "FY23", "deck", key="ebitda")
+    year = claim("EBITDA", 76, "Rs. Cr", "FY24", "deck", key="ebitda")
+    quarter = claim("EBITDA", 109, "Rs. Cr", "Q3 FY24", "deck", key="ebitda")
+
+    negatives = negative_capable([fy23, year, quarter])
+    assert "ebitda" in negatives
+
+    # Without the guard this is a false contradiction.
+    assert reconcile_pair(year, quarter).verdict is Verdict.CONTRADICTS
+    assert reconcile_pair(year, quarter, negatives).verdict is Verdict.COMPLEMENTARY
+
+
+def test_containment_still_applies_to_non_negative_measures():
+    """Revenue never goes negative, so the inequality remains a real proof."""
+    from factlayer.reconcile import negative_capable
+
+    year = claim("revenue from services", 8142, "Rs. Cr", "FY24", "deck", key="rev")
+    quarter = claim("revenue from services", 9000, "Rs. Cr", "Q4 FY24", "deck", key="rev")
+    negatives = negative_capable([year, quarter])
+    assert "rev" not in negatives
+    assert reconcile_pair(year, quarter, negatives).verdict is Verdict.CONTRADICTS
+
+
+def test_same_page_identical_qualifiers_is_underspecified():
+    """Four expense lines all called "% of revenue" are rows, not contradictions."""
+    a = claim("% of revenue", 34.1, "per cent", "Q4 FY24", "deck", key="pct_rev")
+    b = claim("% of revenue", 18.8, "per cent", "Q4 FY24", "deck", key="pct_rev")
+    rel = reconcile_pair(a, b)
+    assert rel.verdict is Verdict.UNDERSPECIFIED
+    assert any(s.check == "provenance" for s in rel.trace)

@@ -18,6 +18,7 @@ the source page does not support is dropped and recorded, not trusted.
 from __future__ import annotations
 
 import difflib
+import re
 from dataclasses import dataclass, field
 
 from .ingest import Page, normalise
@@ -25,7 +26,12 @@ from .models import Claim, ClaimStatus, GroundingStatus
 
 # Minimum similarity for a near-match to count as the same span.
 FUZZY_THRESHOLD = 0.85
+# Share of a quote's characters that must be found, in order, for a
+# non-contiguous match to count as grounded.
+TOKEN_COVERAGE_THRESHOLD = 0.85
 MIN_QUOTE_CHARS = 8
+# Words, numbers and the punctuation that binds them ("8,142", "0.7%", "FY24").
+_TOKEN = re.compile(r"[\w][\w.,%/&'-]*")
 
 # Ways the corpora write the same qualifier. Documents abbreviate ("Adj.
 # EBITDA"), so a literal substring test would wrongly discard a true qualifier.
@@ -51,16 +57,18 @@ class GroundingReport:
     total: int = 0
     exact: int = 0
     fuzzy: int = 0
+    gapped: int = 0
     quarantined: int = 0
     qualifiers_dropped: int = 0
     dropped_detail: dict[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, object]:
-        rate = (self.exact + self.fuzzy) / self.total if self.total else 0.0
+        rate = (self.exact + self.fuzzy + self.gapped) / self.total if self.total else 0.0
         return {
             "claims_checked": self.total,
             "grounded_exact": self.exact,
             "grounded_fuzzy": self.fuzzy,
+            "grounded_gapped": self.gapped,
             "quarantined": self.quarantined,
             "grounding_rate": round(rate, 4),
             "qualifiers_dropped": self.qualifiers_dropped,
@@ -88,15 +96,48 @@ def locate_quote(quote: str, page: Page) -> tuple[GroundingStatus, int | None, i
         anchor = _anchor(quote, page)
         return GroundingStatus.FUZZY, anchor[0], anchor[1]
 
-    # 3. Near-match against the best window of the page.
-    matcher = difflib.SequenceMatcher(None, nq, page.norm_text, autojunk=False)
-    if matcher.real_quick_ratio() >= FUZZY_THRESHOLD:
-        block = matcher.find_longest_match(0, len(nq), 0, len(page.norm_text))
-        if block.size >= max(MIN_QUOTE_CHARS, int(len(nq) * FUZZY_THRESHOLD)):
-            anchor = _anchor(quote, page)
-            return GroundingStatus.FUZZY, anchor[0], anchor[1]
+    # 3. Every token present, in order, but not contiguously.
+    #
+    #    Reading a slide that says "Q4 FY23: Rs.13 Cr / 0.7%", the model quotes
+    #    "Q4 FY23: 0.7%" -- it drops the middle rather than inventing anything.
+    #    Requiring a contiguous span quarantined 62% of claims on the earnings
+    #    deck, nearly all of them true facts that had merely been elided.
+    #
+    #    So the test is not "is this span contiguous" but "does every token of
+    #    the quote appear on this page, in this order". That still rejects a
+    #    fabricated figure, whose tokens are simply not there, while accepting an
+    #    honest abridgement. Such claims are labelled GAPPED rather than folded
+    #    in with clean matches, so the distinction stays visible.
+    covered, start, end = _subsequence_coverage(nq, page.norm_text)
+    if covered >= TOKEN_COVERAGE_THRESHOLD:
+        anchor = _anchor(quote, page)
+        return GroundingStatus.GAPPED, anchor[0] or start, anchor[1] or end
 
     return GroundingStatus.NOT_FOUND, None, None
+
+
+def _subsequence_coverage(quote: str, haystack: str) -> tuple[float, int | None, int | None]:
+    """Fraction of the quote's characters found as in-order tokens in the page.
+
+    Weighted by token length, so matching "revenue" counts for more than
+    matching ":". Returns the span between the first and last matched token.
+    """
+    tokens = _TOKEN.findall(quote)
+    if not tokens:
+        return 0.0, None, None
+    total = sum(len(t) for t in tokens)
+    matched = 0
+    cursor = 0
+    first = last = None
+    for token in tokens:
+        idx = haystack.find(token, cursor)
+        if idx == -1:
+            continue
+        matched += len(token)
+        cursor = idx + len(token)
+        first = idx if first is None else first
+        last = cursor
+    return (matched / total if total else 0.0), first, last
 
 
 def _anchor(quote: str, page: Page) -> tuple[int | None, int | None]:
@@ -149,6 +190,7 @@ def ground_claim(claim: Claim, page: Page, report: GroundingReport) -> Claim:
 
     report.exact += status is GroundingStatus.EXACT
     report.fuzzy += status is GroundingStatus.FUZZY
+    report.gapped += status is GroundingStatus.GAPPED
 
     # Free-text qualifiers the model can invent. `period` is validated by
     # parsing instead, and `as_of` comes from the document profile rather than

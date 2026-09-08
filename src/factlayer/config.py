@@ -44,7 +44,11 @@ class Settings:
     llm_base_url: str = os.getenv("FACTLAYER_LLM_BASE_URL", "https://api.groq.com/openai/v1")
     llm_model: str = os.getenv("FACTLAYER_LLM_MODEL", "openai/gpt-oss-120b")
     llm_api_key: str = _api_key()
-    llm_max_concurrency: int = int(os.getenv("FACTLAYER_LLM_MAX_CONCURRENCY", "4"))
+    llm_max_concurrency: int = int(os.getenv("FACTLAYER_LLM_MAX_CONCURRENCY", "3"))
+    # Minimum gap between request starts. Free tiers meter per minute, so a
+    # steady stream sustains far more throughput than concurrent bursts.
+    llm_min_interval_s: float = float(os.getenv("FACTLAYER_LLM_MIN_INTERVAL_S", "0.7"))
+    llm_max_attempts: int = int(os.getenv("FACTLAYER_LLM_MAX_ATTEMPTS", "8"))
     llm_timeout_s: float = float(os.getenv("FACTLAYER_LLM_TIMEOUT_S", "120"))
     # Generous enough that a dense page's claim list is never cut short.
     llm_max_tokens: int = int(os.getenv("FACTLAYER_LLM_MAX_TOKENS", "16000"))

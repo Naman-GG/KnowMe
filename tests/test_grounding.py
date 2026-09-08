@@ -80,3 +80,24 @@ def test_grounding_report_counts():
     assert d["claims_checked"] == 2
     assert d["quarantined"] == 1
     assert d["grounding_rate"] == 0.5
+
+
+def test_elided_quote_grounds_as_gapped():
+    """The model drops the middle of "Q4 FY23: Rs.13 Cr / 0.7%" but invents nothing."""
+    p = Page(page_no=6, text="Q4 FY23: ₹13 Cr / 0.7%\nEBITDA / EBITDA margin\n")
+    status, _, _ = locate_quote("Q4 FY23: 0.7%", p)
+    assert status is GroundingStatus.GAPPED
+
+
+def test_gapped_matching_still_rejects_fabrication():
+    """Tolerating elision must not tolerate invented figures."""
+    p = Page(page_no=6, text="Q4 FY23: ₹13 Cr / 0.7%\nEBITDA / EBITDA margin\n")
+    status, _, _ = locate_quote("Q4 FY23: ₹99 Cr restated under Ind AS", p)
+    assert status is GroundingStatus.NOT_FOUND
+
+
+def test_out_of_order_tokens_are_not_grounded():
+    """In-order is part of the test; scrambled tokens are not evidence."""
+    p = Page(page_no=1, text="revenue from services was 8,142 Cr in FY24")
+    status, _, _ = locate_quote("FY24 8,142 services revenue from was Cr in", p)
+    assert status is GroundingStatus.NOT_FOUND
