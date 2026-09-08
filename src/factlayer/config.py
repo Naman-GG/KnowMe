@@ -47,7 +47,10 @@ class Settings:
     llm_max_concurrency: int = int(os.getenv("FACTLAYER_LLM_MAX_CONCURRENCY", "3"))
     # Minimum gap between request starts. Free tiers meter per minute, so a
     # steady stream sustains far more throughput than concurrent bursts.
-    llm_min_interval_s: float = float(os.getenv("FACTLAYER_LLM_MIN_INTERVAL_S", "0.7"))
+    llm_min_interval_s: float = float(os.getenv("FACTLAYER_LLM_MIN_INTERVAL_S", "1.0"))
+    # Pause for the window to reset once the reported token budget drops below
+    # roughly one page's worth of work.
+    llm_token_floor: int = int(os.getenv("FACTLAYER_LLM_TOKEN_FLOOR", "3500"))
     llm_max_attempts: int = int(os.getenv("FACTLAYER_LLM_MAX_ATTEMPTS", "8"))
     llm_timeout_s: float = float(os.getenv("FACTLAYER_LLM_TIMEOUT_S", "120"))
     # Generous enough that a dense page's claim list is never cut short.

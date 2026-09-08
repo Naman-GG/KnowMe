@@ -209,3 +209,27 @@ def test_same_page_identical_qualifiers_is_underspecified():
     rel = reconcile_pair(a, b)
     assert rel.verdict is Verdict.UNDERSPECIFIED
     assert any(s.check == "provenance" for s in rel.trace)
+
+
+def test_partly_overlapping_periods_do_not_corroborate():
+    """A 12-month figure and a 9-month stub are different spans, not agreement.
+
+    Taken from the prospectus, where "year ended March 31, 2021" and "nine
+    months period ended December 31, 2021" carried values 0.4% apart and were
+    wrongly reported as corroborating each other.
+    """
+    annual = claim("other expenses", 4208.68, "₹ million", "year ended March 31, 2021",
+                   "prospectus", scope="consolidated", basis="restated")
+    stub = claim("other expenses", 4225.95, "₹ million",
+                 "nine months period ended December 31, 2021",
+                 "prospectus", scope="consolidated", basis="restated")
+    rel = reconcile_pair(annual, stub)
+    assert rel.verdict is Verdict.COMPLEMENTARY
+    assert "overlap" in rel.summary.lower()
+
+
+def test_partly_overlapping_periods_do_not_contradict_either():
+    """The same hole produced false contradictions when values differed."""
+    a = claim("loan repayment", 25.1, "₹ million", "nine months ended December 31, 2021", "d")
+    b = claim("loan repayment", 1.0, "₹ million", "year ended March 31, 2021", "d")
+    assert reconcile_pair(a, b).verdict is Verdict.COMPLEMENTARY

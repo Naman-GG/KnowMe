@@ -42,6 +42,7 @@ class IngestResult:
     claims_active: int
     claims_quarantined: int
     relations_new: int
+    pages_skipped_no_quota: int = 0
     verdicts: dict[str, int] = field(default_factory=dict)
     grounding: dict = field(default_factory=dict)
     measures_added: int = 0
@@ -60,6 +61,7 @@ class IngestResult:
             "claims_active": self.claims_active,
             "claims_quarantined": self.claims_quarantined,
             "relations_new": self.relations_new,
+            "pages_skipped_no_quota": self.pages_skipped_no_quota,
             "verdicts": self.verdicts,
             "grounding": self.grounding,
             "measures_added": self.measures_added,
@@ -161,7 +163,7 @@ async def ingest_pdf(
     if progress:
         progress(f"{doc.filename}: {cov['pages_selected']}/{cov['pages_total']} pages selected")
 
-    profile, claims = await extract_document(doc, llm, budget=budget)
+    profile, claims, pages_skipped = await extract_document(doc, llm, budget=budget)
 
     pages = {p.page_no: p for p in doc.pages}
     report: GroundingReport = ground_claims(claims, pages)
@@ -202,6 +204,7 @@ async def ingest_pdf(
         claims_active=sum(c.status is ClaimStatus.ACTIVE for c in claims),
         claims_quarantined=sum(c.status is ClaimStatus.QUARANTINED for c in claims),
         relations_new=len(relations),
+        pages_skipped_no_quota=pages_skipped,
         verdicts=verdicts,
         grounding=report.as_dict(),
         measures_added=len(registry.entries) - before,

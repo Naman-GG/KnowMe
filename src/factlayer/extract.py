@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .ingest import Document, Page
-from .llm import LLMClient, LLMError
+from .llm import LLMClient, LLMError, QuotaExhausted
 from .models import (
     Claim,
     ClaimStatus,
@@ -335,6 +335,9 @@ async def extract_page(
             ),
             validate=_validate_claims,
         )
+    except QuotaExhausted:
+        # Expected once the daily allowance is gone; the caller reports coverage.
+        raise
     except LLMError as exc:
         log.warning("extraction failed on %s p%d: %s", doc.filename, page.page_no, exc)
         return []
@@ -355,17 +358,39 @@ async def extract_document(
     *,
     budget: int | None = None,
     progress=None,
-) -> tuple[DocProfile, list[Claim]]:
-    """Profile a document, then extract claims from every page triage keeps."""
-    profile = await profile_document(doc, llm)
+) -> tuple[DocProfile, list[Claim], int]:
+    """Profile a document, then extract claims from every page triage keeps.
+
+    Returns the profile, the claims, and how many pages could not be extracted
+    because the provider's daily allowance ran out -- so callers can report
+    real coverage instead of implying the document was fully read.
+    """
+    try:
+        profile = await profile_document(doc, llm)
+    except QuotaExhausted:
+        profile = DocProfile()
     pages: list[PageScore] = triage(doc, budget=budget)
 
+    skipped = 0
+
     async def one(score: PageScore) -> list[Claim]:
+        nonlocal skipped
         page = doc.page(score.page_no)
-        claims = await extract_page(doc, page, profile, llm) if page else []
+        if page is None:
+            return []
+        try:
+            claims = await extract_page(doc, page, profile, llm)
+        except QuotaExhausted:
+            skipped += 1
+            return []
         if progress:
             progress(score.page_no, len(claims))
         return claims
 
     results = await asyncio.gather(*(one(s) for s in pages))
-    return profile, [c for group in results for c in group]
+    if skipped:
+        log.warning(
+            "%s: %d of %d pages not extracted (provider daily quota exhausted)",
+            doc.filename, skipped, len(pages),
+        )
+    return profile, [c for group in results for c in group], skipped

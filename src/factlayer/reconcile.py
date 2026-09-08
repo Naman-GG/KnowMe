@@ -309,6 +309,24 @@ def reconcile_pair(
                          "so the two figures describe different spans of time and both can hold.",
                          trace)
 
+    if not is_state and period_rel == "overlaps":
+        # Partial overlap, with neither period containing the other -- a
+        # financial year against a nine-month stub, say. The spans are simply
+        # different, so the figures are not comparable and agreement between
+        # them would be coincidence. An earlier version had no branch for this
+        # and fell through to the value test, which reported two unrelated
+        # nine-month and twelve-month figures as corroborating because they
+        # happened to land 0.4% apart.
+        trace.append(TraceStep(
+            check="value", outcome="info",
+            detail=f"{agreement.detail} (not compared: the periods only partly overlap)",
+        ))
+        return _relation(a, b, Verdict.COMPLEMENTARY, 0.8,
+                         f"Partly overlapping periods ({pa.label} and {pb.label}): neither "
+                         "contains the other, so the two figures cover different spans and "
+                         "cannot be compared directly.",
+                         trace)
+
     if not is_state and period_rel in ("contains", "during"):
         outer, inner = (a, b) if period_rel == "contains" else (b, a)
         step = _containment_check(outer, inner, "period", negative_measures)
