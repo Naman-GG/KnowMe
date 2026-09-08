@@ -46,6 +46,7 @@ class Usage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     failures: int = 0
+    truncations: int = 0
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -54,6 +55,7 @@ class Usage:
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
             "failures": self.failures,
+            "truncations": self.truncations,
         }
 
 
@@ -99,8 +101,23 @@ class LLMClient:
     # -- cache ------------------------------------------------------------
 
     def _key(self, system: str, user: str, temperature: float) -> str:
+        """Hash every input that can change the output.
+
+        Decoding parameters belong in the key. An earlier version hashed only
+        the model and the prompt, so raising max_tokens and lowering
+        reasoning_effort to fix a truncation bug kept serving the truncated
+        results from cache -- the fix looked like it had failed.
+        """
         blob = json.dumps(
-            [settings.llm_model, system, user, temperature], sort_keys=True
+            [
+                settings.llm_model,
+                system,
+                user,
+                temperature,
+                settings.llm_max_tokens,
+                settings.llm_reasoning_effort,
+            ],
+            sort_keys=True,
         ).encode()
         return hashlib.sha256(blob).hexdigest()
 
@@ -141,7 +158,7 @@ class LLMClient:
         if self._client is None:
             self._client = httpx.AsyncClient(timeout=settings.llm_timeout_s)
 
-        body = {
+        body: dict[str, Any] = {
             "model": settings.llm_model,
             "messages": [
                 {"role": "system", "content": system},
@@ -149,7 +166,14 @@ class LLMClient:
             ],
             "temperature": temperature,
             "response_format": {"type": "json_object"},
+            "max_tokens": settings.llm_max_tokens,
         }
+        # gpt-oss is a reasoning model. Left at its default effort it spent ~86%
+        # of the completion budget on internal reasoning (2,653 of 3,072 tokens
+        # on a single page) and truncated the JSON it was actually asked for.
+        # Extraction is careful copying, not deduction, so we buy the budget back.
+        if settings.llm_reasoning_effort:
+            body["reasoning_effort"] = settings.llm_reasoning_effort
         headers = {"Authorization": f"Bearer {settings.llm_api_key}"}
         url = settings.llm_base_url.rstrip("/") + "/chat/completions"
 
@@ -164,13 +188,31 @@ class LLMClient:
                     await asyncio.sleep(min(retry_after, 30) + random.uniform(0, 1))
                     delay = min(delay * 2, 30)
                     continue
+                if r.status_code == 400 and "reasoning_effort" in r.text:
+                    # Provider does not know the parameter; drop it and retry.
+                    body.pop("reasoning_effort", None)
+                    continue
                 r.raise_for_status()
                 data = r.json()
                 self.usage.calls += 1
                 if (u := data.get("usage")):
                     self.usage.prompt_tokens += u.get("prompt_tokens", 0)
                     self.usage.completion_tokens += u.get("completion_tokens", 0)
-                return data["choices"][0]["message"]["content"] or ""
+
+                choice = data["choices"][0]
+                # A truncated completion can still be valid JSON -- the model
+                # simply stops after fewer claims than the page holds. That
+                # loses facts silently, which is worse than an error, so it is
+                # surfaced rather than accepted.
+                if choice.get("finish_reason") == "length":
+                    self.usage.truncations += 1
+                    raise LLMError(
+                        "response truncated (finish_reason=length); "
+                        f"completion_tokens={(data.get('usage') or {}).get('completion_tokens')}"
+                    )
+                return choice["message"]["content"] or ""
+            except LLMError:
+                raise
             except (httpx.HTTPError, KeyError, IndexError) as exc:
                 last = exc
                 await asyncio.sleep(delay + random.uniform(0, 1))
