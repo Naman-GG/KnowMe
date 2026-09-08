@@ -18,26 +18,38 @@ derivation shown.
 Requires Python 3.11+ and an API key for any OpenAI-compatible endpoint. The
 default targets **Groq's free tier**, so this runs without a paid account.
 
+### Look at the results without an API key
+
+A pre-built database of the full run is committed, so the results can be
+inspected immediately — no key, no ingestion, no waiting. Reading and
+reconciling need no model calls, because every verdict was computed by
+deterministic code.
+
 ```bash
 git clone <this repo> && cd KnowMe
-
-# 1. environment
 uv venv --python 3.12 && uv pip install -e ".[dev]"
-#    (or: python -m venv .venv && .venv/bin/pip install -e ".[dev]")
+#  (or: python -m venv .venv && .venv/bin/pip install -e ".[dev]")
 
-# 2. credentials -- .env is gitignored
+.venv/bin/python -m pytest -q                    # 93 tests, none hit the network
+
+mkdir -p data && cp sample/factlayer.db data/    # 6 documents, 1,700 claims
+.venv/bin/python scripts/demo.py                 # the four required cases
+.venv/bin/python -m uvicorn factlayer.api:app --app-dir src
+#  then open http://127.0.0.1:8000
+```
+
+### Run it yourself on new PDFs
+
+Uploading a PDF, or re-ingesting the corpus, does need a key. Any
+OpenAI-compatible endpoint works; the default targets **Groq's free tier**.
+
+```bash
 cp .env.example .env
-#    then set FACTLAYER_LLM_API_KEY (GROQ_API_KEY / OPENAI_API_KEY also work)
+#  set FACTLAYER_LLM_API_KEY (GROQ_API_KEY / OPENAI_API_KEY are also read)
 
-# 3. tests -- 80 of them, none of which need the network
-.venv/bin/python -m pytest -q
-
-# 4. ingest the starter corpora
-.venv/bin/python scripts/ingest.py --all
-
-# 5. browse the results
-.venv/bin/python -m uvicorn factlayer.api:app --app-dir src --reload
-#    then open http://127.0.0.1:8000
+.venv/bin/python scripts/ingest.py --all         # or: path/to/your.pdf
+.venv/bin/python -m uvicorn factlayer.api:app --app-dir src
+#  the UI's "Add PDF" button ingests through the same pipeline
 ```
 
 Upload further PDFs through the UI, or:
@@ -56,11 +68,17 @@ Useful extras:
 .venv/bin/python scripts/eval_triage.py --sweep  # page-selection recall
 ```
 
-**A note on rate limits.** Groq's free tier allows 8,000 tokens per minute, and
-a page of extraction costs roughly 3,000, so a full 511-page ingest takes a few
-hours. Every LLM call is cached to disk by a hash of its inputs, so re-runs are
-instant and an interrupted run resumes where it stopped. Use `--budget 30` to
-cap pages per document for a faster look.
+**A note on rate limits.** Groq's free tier allows **200,000 tokens per day**
+and 8,000 per minute; a page of extraction costs roughly 4,000. A full 511-page
+ingest is therefore several days of free allowance, which is why the committed
+database was built from capped page budgets across several keys, and why
+`sample/factlayer.db` exists at all.
+
+Every model call is cached to disk by a hash of its inputs, so re-runs are
+instant and an interrupted run resumes where it stopped. When the daily
+allowance runs out the pipeline stops retrying, finishes on cached work, and
+reports `pages_skipped_no_quota` rather than pretending to full coverage. Use
+`--budget 30` to cap pages per document.
 
 ## Video demo
 
@@ -456,3 +474,4 @@ OCR for scanned PDFs, which currently yield nothing.
 | `src/factlayer/api.py` + `web/` | API and the disagreement inbox |
 | `scripts/` | `ingest`, `demo`, `audit`, `rebuild`, `refresh_subjects`, `eval_triage` |
 | `docs/` | `DECISIONS.md`, `LIMITATIONS.md` |
+| `sample/factlayer.db` | Pre-built results — browse without a key |
