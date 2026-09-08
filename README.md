@@ -225,50 +225,39 @@ Grounding also covers **qualifiers**, which turned out to matter more. See
 ### Architecture
 
 ```mermaid
-flowchart TB
-    PDF([PDF upload<br/>API or CLI]) --> ING
+flowchart LR
+    PDF([PDF]) --> ING[Ingest] --> TRI[Triage] --> PRO[Profile] --> EXT[Extract]
+    EXT --> GND[Ground] --> CAN[Canonicalise] --> REC[Reconcile] --> DB[(SQLite)] --> UI[API + UI]
+    CACHE[(disk cache)] -.-> EXT
+    DB -. "rebuild.py - no model calls" .-> REC
 
-    subgraph DET1["Deterministic - no model calls"]
-        ING["<b>Ingest</b><br/>pages + character offsets<br/>doc id = content hash"]
-        TRI["<b>Triage</b><br/>fact-density scoring<br/>drops empty pages"]
-        ING --> TRI
-    end
-
-    TRI --> PRO
-
-    subgraph PAID["The only stages that cost money"]
-        PRO["<b>Profile</b> - 1 call per document<br/>publisher, subject, date,<br/>default units and scope"]
-        EXT["<b>Extract</b> - 1 call per page<br/>Claims with a verbatim quote<br/>and decomposed qualifiers"]
-        PRO --> EXT
-    end
-
-    CACHE[("Disk cache<br/>keyed by hash of<br/>model + prompt + params")]
-    CACHE -.->|"re-runs are free"| PAID
-
-    EXT --> GND
-
-    subgraph DET2["Deterministic - no model calls"]
-        GND["<b>Ground</b><br/>quote must be on the cited page<br/>qualifiers must be supported<br/>failures quarantined, not dropped"]
-        CAN["<b>Canonicalise</b><br/>measure registry that grows<br/>with the corpus"]
-        REC["<b>Reconcile</b><br/>units -> period -> scope -> basis<br/>then values<br/>five verdicts + derivation trace"]
-        GND --> CAN --> REC
-    end
-
-    REC --> DB[("SQLite<br/>claims - relations - registry")]
-    DB --> API["FastAPI"] --> UI["Review UI<br/>disagreement inbox"]
-
-    DB -.->|"re-normalise + re-reconcile<br/><b>zero model calls</b>"| REC
-
-    QUAR[["Quarantine<br/>111 claims"]]
-    GND -.-> QUAR
-
-    classDef paid fill:#7c2d12,stroke:#ea580c,color:#fff
-    classDef det fill:#14532d,stroke:#22c55e,color:#fff
-    classDef store fill:#1e3a5f,stroke:#3b82f6,color:#fff
+    classDef paid fill:#ffd8a8,stroke:#e8590c,color:#000
+    classDef det fill:#b2f2bb,stroke:#2f9e44,color:#000
+    classDef store fill:#a5d8ff,stroke:#1971c2,color:#000
     class PRO,EXT paid
     class ING,TRI,GND,CAN,REC det
-    class DB,CACHE,QUAR store
+    class DB,CACHE store
 ```
+
+**Orange stages call a model; green stages do not.** Only `Profile` (one call per
+document) and `Extract` (one call per page) cost anything, and both of them only
+*read*. Everything that decides what a fact means, and whether two facts agree,
+is ordinary code.
+
+| Stage | What it does |
+|---|---|
+| **Ingest** | PDF to pages with character offsets; document id is a content hash, so re-uploading is a no-op |
+| **Triage** | Generic fact-density scoring; drops covers, contents pages and blank leaves |
+| **Profile** | Publisher, subject, date, default units and scope — inherited by that document's claims |
+| **Extract** | Claims carrying a verbatim quote and decomposed qualifiers |
+| **Ground** | The quote must be on the cited page and each qualifier must be supported; failures are quarantined, not dropped |
+| **Canonicalise** | Maps measure names into a registry that grows with the corpus |
+| **Reconcile** | Units, then period, scope and basis, and *only then* values — five verdicts, each with a derivation trace |
+
+The dotted line back from the store is the useful part: claims keep the raw
+period and unit strings their documents used, so an improved parser can be
+re-applied to everything already stored without paying to read the PDFs again.
+
 
 Two properties fall out of this shape:
 
