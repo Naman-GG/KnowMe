@@ -224,16 +224,60 @@ Grounding also covers **qualifiers**, which turned out to matter more. See
 
 ### Architecture
 
-```
-PDF → ingest ─→ triage ─→ profile ─→ extract ─→ ground ─→ canonicalise ─→ reconcile → SQLite
-      pages,     drop      doc-level   LLM       verify     growing        five
-      offsets    empty     defaults    (only     quotes +   measure        verdicts
-                 pages                 paid      qualifiers registry       + traces
-                                       stage)
+```mermaid
+flowchart TB
+    PDF([PDF upload<br/>API or CLI]) --> ING
+
+    subgraph DET1["Deterministic - no model calls"]
+        ING["<b>Ingest</b><br/>pages + character offsets<br/>doc id = content hash"]
+        TRI["<b>Triage</b><br/>fact-density scoring<br/>drops empty pages"]
+        ING --> TRI
+    end
+
+    TRI --> PRO
+
+    subgraph PAID["The only stages that cost money"]
+        PRO["<b>Profile</b> - 1 call per document<br/>publisher, subject, date,<br/>default units and scope"]
+        EXT["<b>Extract</b> - 1 call per page<br/>Claims with a verbatim quote<br/>and decomposed qualifiers"]
+        PRO --> EXT
+    end
+
+    CACHE[("Disk cache<br/>keyed by hash of<br/>model + prompt + params")]
+    CACHE -.->|"re-runs are free"| PAID
+
+    EXT --> GND
+
+    subgraph DET2["Deterministic - no model calls"]
+        GND["<b>Ground</b><br/>quote must be on the cited page<br/>qualifiers must be supported<br/>failures quarantined, not dropped"]
+        CAN["<b>Canonicalise</b><br/>measure registry that grows<br/>with the corpus"]
+        REC["<b>Reconcile</b><br/>units -> period -> scope -> basis<br/>then values<br/>five verdicts + derivation trace"]
+        GND --> CAN --> REC
+    end
+
+    REC --> DB[("SQLite<br/>claims - relations - registry")]
+    DB --> API["FastAPI"] --> UI["Review UI<br/>disagreement inbox"]
+
+    DB -.->|"re-normalise + re-reconcile<br/><b>zero model calls</b>"| REC
+
+    QUAR[["Quarantine<br/>111 claims"]]
+    GND -.-> QUAR
+
+    classDef paid fill:#7c2d12,stroke:#ea580c,color:#fff
+    classDef det fill:#14532d,stroke:#22c55e,color:#fff
+    classDef store fill:#1e3a5f,stroke:#3b82f6,color:#fff
+    class PRO,EXT paid
+    class ING,TRI,GND,CAN,REC det
+    class DB,CACHE,QUAR store
 ```
 
-Only `extract` and the registry's ambiguous-pair adjudication cost money.
-Everything else is deterministic and unit-tested.
+Two properties fall out of this shape:
+
+* **Extraction is the only paid stage**, and it is cached by a hash of its
+  inputs. Everything that decides *what a fact means* and *whether two facts
+  agree* is ordinary code that can be read, tested and stepped through.
+* **The dotted line back from the store to the reconciler** is why improving a
+  parser is free: claims keep the raw period and unit strings the documents
+  used, so better normalisation can be re-applied to what is already stored.
 
 **Improving the deterministic layers is free.** Every claim keeps the period and
 unit strings the document actually used, so a better parser can be re-applied to
@@ -473,5 +517,5 @@ OCR for scanned PDFs, which currently yield nothing.
 | `src/factlayer/db.py` | SQLite store |
 | `src/factlayer/api.py` + `web/` | API and the disagreement inbox |
 | `scripts/` | `ingest`, `demo`, `audit`, `rebuild`, `refresh_subjects`, `eval_triage` |
-| `docs/` | `DECISIONS.md`, `LIMITATIONS.md` |
+| `docs/` | `DECISIONS.md`, `LIMITATIONS.md`, `architecture.excalidraw` |
 | `sample/factlayer.db` | Pre-built results — browse without a key |

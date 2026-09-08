@@ -72,6 +72,12 @@
   .o-pass{color:var(--ok)} .o-fail{color:var(--bad)}
   .o-info{color:var(--info)} .o-blocked{color:var(--warn)}
   .empty{padding:48px;text-align:center;color:var(--muted)}
+  .caseh{margin:26px 0 10px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  .caseh h3{margin:0;font-size:14px}
+  .caseh p{margin:4px 0 0;color:var(--muted);font-size:12.5px}
+  .tally{display:grid;grid-template-columns:60px 1fr;gap:4px 12px;font-family:var(--mono);
+         font-size:12px;margin-top:10px}
+  .tally b{color:var(--bad)}
   .up{margin-left:auto;display:flex;gap:8px;align-items:center}
   input[type=file]{font-size:12px;font-family:inherit;max-width:210px}
   .note{font-size:12px;color:var(--muted);padding:8px 0}
@@ -86,7 +92,8 @@
 
 <div class="wrap">
   <div class="bar" id="filters">
-    <button class="f" data-v="" aria-pressed="true">All</button>
+    <button class="f" id="cases" aria-pressed="true">The four cases</button>
+    <button class="f" data-v="">All</button>
     <button class="f" data-v="contradicts">Contradicts</button>
     <button class="f" data-v="corroborates">Corroborates</button>
     <button class="f" data-v="complementary">Complementary</button>
@@ -105,10 +112,60 @@
 
 <script>
 const $ = s => document.querySelector(s);
-let verdict = "", crossOnly = false, showFails = false;
+let verdict = "", crossOnly = false, showFails = false, showCases = true;
 
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+const CASES = [
+  ["case1", "Case 1 — a fact corroborated across documents",
+   "Two documents state the same fact in different words and different units. The system must recognise them as the same measure and confirm they agree."],
+  ["case2", "Case 2 — a genuine or likely contradiction",
+   "Same measure, same period, same scope and basis, and the values still disagree. Nothing in the qualifiers explains the gap."],
+  ["case3", "Case 3 — an apparent contradiction explained by context",
+   "Figures that look like a conflict until a qualifier accounts for them: a nested period, a different reporting scope, or a different accounting basis."],
+];
+
+async function loadCases(){
+  const d = await (await fetch("/api/highlights")).json();
+  const parts = [];
+  for (const [key, title, blurb] of CASES){
+    const rows = key === "case3" ? (d[key] || []) : (d[key] ? [d[key]] : []);
+    parts.push(`<div class="caseh"><h3>${title}</h3><p>${blurb}</p></div>`);
+    parts.push(rows.length ? rows.map(card).join("")
+      : `<div class="empty">No example of this in the current database.</div>`);
+  }
+
+  const f = d.case4 || {};
+  const g = f.grounding || {};
+  parts.push(`<div class="caseh"><h3>Case 4 — an extraction failure, found and handled</h3>
+    <p>Claims whose evidence did not hold up. They are kept and reported rather than
+       silently dropped, so the failure stays visible and measurable.</p></div>`);
+  parts.push(`<div class="card"><div class="body" style="display:block">
+      <b>${(100*(f.grounding_rate ?? 0)).toFixed(1)}%</b> of claims verified against their
+      source page &mdash; ${g.exact||0} exact, ${g.fuzzy||0} normalised,
+      ${g.gapped||0} elided, <b>${g.not_found||0} rejected</b>.
+      <p>Grounding also checks <em>qualifiers</em>. A model that invents the context a
+      figure sits in is more dangerous than one that invents the figure: a missing scope
+      yields an honest &ldquo;underspecified&rdquo;, an invented one yields a confident
+      comparison between claims that were never comparable.</p>
+      <div class="tally">${(f.invented_qualifiers||[]).map(i =>
+        `<b>${i.count}&times;</b><span>${esc(i.qualifier)}</span>`).join("")}</div>
+    </div></div>`);
+  for (const c of (f.quarantined || [])){
+    parts.push(`<div class="card"><div class="body" style="display:block">
+      <div class="doc">${esc(c.document || c.doc_id)} &middot; pdf p.${c.evidence.page}</div>
+      <div class="m">${esc(c.measure)} = ${esc(c.value)}</div>
+      <div class="s">${esc(c.reason || "evidence not found on the cited page")}</div>
+      <blockquote>${esc(c.evidence.quote)}</blockquote></div></div>`);
+  }
+
+  $("#list").innerHTML = parts.join("");
+  document.querySelectorAll(".head").forEach(h =>
+    h.onclick = () => h.parentElement.classList.toggle("open"));
+  // Open the first card of each case so the derivations are visible immediately.
+  document.querySelectorAll(".caseh + .card").forEach(c => c.classList.add("open"));
+}
 
 async function loadFailures(){
   const [q, sum] = await Promise.all([
@@ -208,6 +265,7 @@ function card(r){
 const PRIORITY = {contradicts:0, corroborates:1, supersedes:2, complementary:3, underspecified:4};
 
 async function load(){
+  if (showCases) return loadCases();
   if (showFails) return loadFailures();
   const qs = new URLSearchParams({limit:"120"});
   if (verdict) qs.set("verdict", verdict);
@@ -226,14 +284,20 @@ async function load(){
 
 $("#filters").addEventListener("click", e => {
   const b = e.target.closest("button.f"); if (!b) return;
-  if (b.id === "xdoc"){
-    crossOnly = !crossOnly; b.setAttribute("aria-pressed", crossOnly);
-    showFails = false; $("#fails").setAttribute("aria-pressed", false);
-  } else if (b.id === "fails"){
-    showFails = !showFails; b.setAttribute("aria-pressed", showFails);
-  } else if (b.dataset.v !== undefined){
-    verdict = b.dataset.v; showFails = false;
+  const clearModes = () => {
+    showCases = false; showFails = false;
+    $("#cases").setAttribute("aria-pressed", false);
     $("#fails").setAttribute("aria-pressed", false);
+  };
+  if (b.id === "cases"){
+    clearModes(); showCases = true; b.setAttribute("aria-pressed", true);
+  } else if (b.id === "xdoc"){
+    crossOnly = !crossOnly; b.setAttribute("aria-pressed", crossOnly);
+    clearModes();
+  } else if (b.id === "fails"){
+    clearModes(); showFails = true; b.setAttribute("aria-pressed", true);
+  } else if (b.dataset.v !== undefined){
+    verdict = b.dataset.v; clearModes();
     document.querySelectorAll("button.f[data-v]").forEach(x =>
       x.setAttribute("aria-pressed", x === b));
   } else return;

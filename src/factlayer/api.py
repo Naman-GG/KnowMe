@@ -181,6 +181,68 @@ async def registry() -> dict:
     }
 
 
+def _pick(verdict: str, *, cross_doc: bool = False, needs: str | None = None,
+          outcome: tuple[str, ...] = ("pass", "fail", "info")) -> Relation | None:
+    """First relation of a verdict, preferring one whose trace shows `needs`."""
+    pool = store.relations(verdict=verdict, cross_doc_only=cross_doc, limit=300)
+    if needs:
+        for r in pool:
+            if any(s.check == needs and s.outcome in outcome for s in r.trace):
+                return r
+        return None
+    return pool[0] if pool else None
+
+
+@app.get("/api/highlights")
+async def highlights() -> dict:
+    """The four cases the assignment asks for, found by searching the results.
+
+    Nothing here names a document, a figure or a page. Each case is located by
+    the *shape* of its derivation -- a cross-document corroboration, a conflict
+    with no qualifier to explain it, a period-containment or basis difference --
+    so this keeps working on a corpus the system has never seen.
+    """
+    docs = _doc_names()
+
+    def view(rel: Relation | None) -> dict | None:
+        return _relation_view(rel, docs) if rel else None
+
+    corroboration = _pick("corroborates", cross_doc=True) or _pick("corroborates")
+    contradiction = _pick("contradicts", cross_doc=True) or _pick("contradicts")
+    by_period = _pick("complementary", needs="period-containment", outcome=("pass",))
+    by_basis = _pick("complementary", needs="basis", outcome=("info",))
+    by_scope = _pick("complementary", needs="scope", outcome=("info",))
+
+    dropped: dict[str, int] = {}
+    for c in store.all_claims(active_only=False):
+        for k, v in c.qualifiers.extra.items():
+            if k.startswith("dropped_"):
+                key = f"{k.replace('dropped_', '')} = {v}"
+                dropped[key] = dropped.get(key, 0) + 1
+
+    s = store.summary()
+    g = s["grounding"]
+    total = sum(g.values()) or 1
+    return {
+        "case1": view(corroboration),
+        "case2": view(contradiction),
+        "case3": [view(r) for r in (by_period, by_basis, by_scope) if r],
+        "case4": {
+            "grounding_rate": round((total - g.get("not_found", 0)) / total, 4),
+            "grounding": g,
+            "quarantined": [
+                {**_claim_view(c), "reason": c.quarantine_reason,
+                 "document": docs.get(c.doc_id, c.doc_id)}
+                for c in store.quarantined(limit=6)
+            ],
+            "invented_qualifiers": sorted(
+                ({"qualifier": k, "count": n} for k, n in dropped.items()),
+                key=lambda d: -d["count"],
+            )[:8],
+        },
+    }
+
+
 @app.post("/api/documents")
 async def upload(file: UploadFile = File(...), budget: int | None = None) -> JSONResponse:
     """Accept a PDF, run it through the pipeline, and report what changed."""
