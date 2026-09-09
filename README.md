@@ -11,7 +11,7 @@ just *that* two figures differ, but **why**, with the derivation shown.
 
 ---
 
-## Quick start
+## Setup and run instructions
 
 ### 1 · Browse the results — no API key needed
 
@@ -69,7 +69,11 @@ Or use the **Add PDF** button in the UI — same pipeline.
 
 ## Video demo
 
-*(link to be added)*
+**[Watch the demo (3 min)](https://drive.google.com/file/d/1BCrYJ-SxB_eIEvVIzww_aBUWG4izg4UD/view?usp=sharing)**
+
+Covers a PDF being processed and all four required cases: a cross-document
+corroboration, a genuine contradiction, an apparent contradiction explained by
+context, and an extraction failure that was found and handled.
 
 ---
 
@@ -378,6 +382,36 @@ what is principled from what is tuned to this corpus.
 **Next, in order:** a labelled evaluation set · per-document fiscal-year
 inference · table-aware extraction so row labels survive · claim-level rather
 than document-level `as_of` · OCR for scanned PDFs.
+
+---
+
+## Additional notes
+
+- **Everything runs on a free tier.** The default provider is Groq's free
+  `openai/gpt-oss-120b`, so this can be evaluated without a paid account — and
+  the committed `sample/factlayer.db` means it can be evaluated without any
+  account at all.
+- **511 pages is about six days of free allowance** (200k tokens/day, ~4k per
+  page). Coverage is therefore partial and the pipeline reports exactly which
+  pages it skipped rather than implying it read them.
+- **The interesting reading is in `docs/`.**
+  [`DECISIONS.md`](docs/DECISIONS.md) is the working log — including the dead
+  ends, like a stratified page-selection scheme that scored *worse* and was
+  deleted. [`LIMITATIONS.md`](docs/LIMITATIONS.md) separates what is principled
+  from what is tuned to this corpus, and names the hardcoded assumption most
+  likely to fail silently on an unfamiliar document.
+- **`scripts/audit.py` is adversarial towards this system's own output.** It
+  hunts for unparsed periods, unrecognised units, over-merged registry entries
+  and suspiciously generic measure names — the shapes that indicate the pipeline
+  got something wrong.
+- **95 tests, none of which touch the network.** Every normaliser and every
+  verdict is tested against figures that genuinely appear in the starter corpus,
+  so the four required cases are pinned as a specification rather than a demo.
+- **Several bugs in this repository were found by reading its own output**, not
+  by writing tests first: a page cited as `p.740` in a 27-page deck, two
+  partly-overlapping periods reported as corroborating, and a quarantine message
+  that said "not found" for a figure that was plainly on the page. Each is
+  written up where it was fixed.
 
 ---
 
